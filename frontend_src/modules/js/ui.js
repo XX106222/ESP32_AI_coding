@@ -1,11 +1,48 @@
 // ─── 复制功能 ─────────────────────────────────────────────
+async function writeClipboardWithFallback(text) {
+  const safeText = String(text == null ? '' : text);
+
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(safeText);
+    return;
+  }
+
+  const ta = document.createElement('textarea');
+  ta.value = safeText;
+  ta.setAttribute('readonly', 'readonly');
+  ta.style.position = 'fixed';
+  ta.style.top = '-9999px';
+  ta.style.left = '-9999px';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  ta.setSelectionRange(0, ta.value.length);
+
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } finally {
+    document.body.removeChild(ta);
+  }
+
+  if (!copied) {
+    throw new Error('clipboard unavailable');
+  }
+}
+
 async function copyText(btn, text) {
   try {
-    await navigator.clipboard.writeText(text);
+    await writeClipboardWithFallback(text);
     const orig = btn.textContent;
     btn.textContent = '✓ 已复制';
-    setTimeout(() => btn.textContent = orig, 1500);
-  } catch(e) { showToast('复制失败'); }
+    setTimeout(() => {
+      btn.textContent = orig;
+    }, 1500);
+  } catch (e) {
+    console.warn('copy failed', e);
+    showToast('复制失败：浏览器未授予剪贴板权限');
+  }
 }
 
 function copyMsgContent(btn) {

@@ -42,6 +42,40 @@ let sidebarExpandedWidth = 380;
 let agentSettingsCache = null;
 let agentMemoryBaseline = {};
 
+function getModePromptFromSettings(mode, settings) {
+  const m = String(mode || 'normal').trim().toLowerCase();
+  const cfg = (settings && typeof settings === 'object') ? settings : {};
+  const modePrompts = (cfg.modePrompts && typeof cfg.modePrompts === 'object') ? cfg.modePrompts : {};
+  const fromMode = modePrompts[m];
+  if (typeof fromMode === 'string' && fromMode.trim()) return fromMode;
+  const legacy = cfg.systemPrompt;
+  if (typeof legacy === 'string' && legacy.trim()) return legacy;
+  return '';
+}
+
+function resolveChatModePrompt(mode) {
+  const m = String(mode || 'normal').trim().toLowerCase();
+  if (m === 'normal') return String(config.systemPrompt || '');
+  return getModePromptFromSettings(m, agentSettingsCache);
+}
+
+async function syncNormalPromptToAgentSettings(normalPrompt) {
+  const prompt = String(normalPrompt || '');
+  let base = agentSettingsCache;
+  if (!base || typeof base !== 'object') {
+    base = await apiGet('/agent/settings');
+  }
+  const payload = { ...(base || {}) };
+  const modePrompts = (payload.modePrompts && typeof payload.modePrompts === 'object') ? { ...payload.modePrompts } : {};
+  modePrompts.normal = prompt;
+  payload.modePrompts = modePrompts;
+  // Keep legacy field aligned for backward-compatible fallback.
+  payload.systemPrompt = prompt;
+
+  const ret = await apiPost('/agent/settings', payload);
+  agentSettingsCache = (ret && ret.settings && typeof ret.settings === 'object') ? ret.settings : payload;
+}
+
 // ─── DOM 引用 ─────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const el = {
@@ -698,6 +732,11 @@ async function saveConfig() {
 
   try {
     await apiPost('/config', config);
+    try {
+      await syncNormalPromptToAgentSettings(config.systemPrompt);
+    } catch (syncErr) {
+      console.warn('Sync normal mode prompt to agent settings failed:', syncErr);
+    }
     showConfigStatus('✓ 配置已保存到 ESP32', 'ok');
   } catch (e) {
     showConfigStatus('已保存到浏览器，ESP32 写入失败', 'err');
@@ -758,8 +797,14 @@ async function loadAgentSettings() {
     if (!settings || typeof settings !== 'object') throw new Error('invalid settings');
     agentSettingsCache = settings;
     const modePrompts = (settings.modePrompts && typeof settings.modePrompts === 'object') ? settings.modePrompts : {};
-    const codingPrompt = String(modePrompts.coding || settings.systemPrompt || '');
+    const codingPrompt = String(modePrompts.coding || getModePromptFromSettings('coding', settings) || '');
+    const normalPrompt = String(modePrompts.normal || config.systemPrompt || '');
     if (el.agentCodingPrompt) el.agentCodingPrompt.value = codingPrompt;
+    if (el.systemPrompt && normalPrompt !== String(el.systemPrompt.value || '')) {
+      el.systemPrompt.value = normalPrompt;
+      config.systemPrompt = normalPrompt;
+      localStorage.setItem('ai_chat_config', JSON.stringify(config));
+    }
     showInlineStatus(el.agentPromptStatus, '已加载', 'ok');
   } catch (e) {
     showInlineStatus(el.agentPromptStatus, '加载失败: ' + e.message, 'err');

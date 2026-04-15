@@ -222,6 +222,183 @@ def _http_chat_completion(payload):
         return False, str(e), None
 
 
+def _http_chat_completion_stream(payload):
+    if _requests is None:
+        return False, "HTTP client not available on this firmware", None
+
+    cfg = read_json(st.CONFIG_FILE, st.DEFAULT_CONFIG)
+    if not isinstance(cfg, dict):
+        cfg = st.DEFAULT_CONFIG
+
+    base_url = str(cfg.get("baseUrl", "") or "").rstrip("/")
+    api_key = str(cfg.get("apiKey", "") or "")
+    model = str(cfg.get("model", "gpt-4o") or "gpt-4o")
+    temperature = cfg.get("temperature", 0.2)
+
+    if not base_url:
+        return False, "baseUrl is empty", None
+    if not api_key:
+        return False, "apiKey is empty", None
+
+    body = {
+        "model": model,
+        "messages": payload,
+        "temperature": float(temperature),
+        "stream": True,
+    }
+
+    url = base_url + "/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + api_key,
+    }
+
+    try:
+        payload_text = _ascii_json_text(st.json.dumps(body))
+        payload_bytes = payload_text.encode("utf-8")
+        try:
+            resp = _requests.post(url, headers=headers, data=payload_bytes, stream=True)
+        except TypeError:
+            # Some MicroPython HTTP clients do not expose stream kwarg.
+            resp = _requests.post(url, headers=headers, data=payload_bytes)
+
+        status = getattr(resp, "status_code", 200)
+        if status < 200 or status >= 300:
+            text = ""
+            try:
+                text = resp.text
+            except Exception:
+                pass
+            try:
+                resp.close()
+            except Exception:
+                pass
+            return False, "upstream HTTP %d: %s" % (status, text[:300]), None
+        return True, "", resp
+    except Exception as e:
+        return False, str(e), None
+
+
+def _iter_upstream_sse_lines(resp):
+    if resp is None:
+        return
+
+    # CPython requests: robust line iterator.
+    if hasattr(resp, "iter_lines"):
+        try:
+            for line in resp.iter_lines(decode_unicode=True):
+                if line is None:
+                    continue
+                yield str(line)
+            return
+        except Exception:
+            pass
+
+    # MicroPython urequests: try raw socket readline.
+    raw = getattr(resp, "raw", None)
+    if raw is not None and hasattr(raw, "readline"):
+        while True:
+            try:
+                line = raw.readline()
+            except Exception:
+                break
+            if not line:
+                break
+            if isinstance(line, bytes):
+                try:
+                    yield line.decode("utf-8")
+                except Exception:
+                    yield line.decode("utf-8", "ignore")
+            else:
+                yield str(line)
+        return
+
+    # Last-resort fallback: parse full body by lines.
+    try:
+        text = resp.text
+    except Exception:
+        text = ""
+    for line in str(text or "").split("\n"):
+        yield line
+
+
+def _extract_stream_choice_fields(evt):
+    if not isinstance(evt, dict):
+        return "", ""
+    choices = evt.get("choices", [])
+    if not isinstance(choices, list) or not choices:
+        return "", ""
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    delta = first.get("delta", {}) if isinstance(first, dict) else {}
+    message = first.get("message", {}) if isinstance(first, dict) else {}
+
+    thinking = ""
+    content = ""
+
+    if isinstance(delta, dict):
+        thinking = delta.get("reasoning_content") or delta.get("thinking") or ""
+        content = delta.get("content") or ""
+    if (not thinking) and isinstance(message, dict):
+        thinking = message.get("reasoning_content") or message.get("thinking") or ""
+    if (not content) and isinstance(message, dict):
+        content = message.get("content") or ""
+
+    return str(thinking or ""), str(content or "")
+
+
+def _build_agent_result_from_ai_text(ai_text, thinking_text, auto_run=True, force_run=False, persist_active=False, mode="coding"):
+    _append_agent_log("assistant", ai_text)
+
+    try:
+        ai_obj = _extract_json_payload(ai_text)
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": "invalid JSON from model: %s" % e,
+            "raw": ai_text,
+        }
+
+    code_text = str(ai_obj.get("code", "") or "").strip()
+    notes = str(ai_obj.get("notes", "") or "")
+    memory = _apply_memory(ai_obj.get("memory", {}))
+
+    settings = _agent_settings()
+    auto_save_draft = bool(settings.get("autoSaveDraft", True))
+    if code_text and auto_save_draft:
+        atomic_write_text(st.CODE_DRAFT_FILE, code_text + "\n")
+
+    run_info = {"started": False, "error": "", "jobId": ""}
+    if auto_run and code_text:
+        if force_run and runtime_get("running", False):
+            runtime_set_many({"stopRequested": True})
+            deadline = time.time() + 4
+            while runtime_get("running", False) and time.time() < deadline:
+                time.sleep(0.1)
+
+        job_id, run_err = start_code_run(code_text, "agent_chat")
+        if job_id:
+            run_info = {"started": True, "error": "", "jobId": job_id}
+        else:
+            run_info = {"started": False, "error": run_err, "jobId": ""}
+
+    if persist_active and code_text and (not runtime_get("running", False)):
+        try:
+            atomic_write_text(st.CODE_ACTIVE_FILE, code_text + "\n")
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "mode": mode,
+        "code": code_text,
+        "notes": notes,
+        "thinking": str(thinking_text or ""),
+        "memory": memory,
+        "run": run_info,
+        "raw": ai_text,
+    }
+
+
 def _extract_json_payload(raw_text):
     text = str(raw_text or "").strip()
     if text.startswith("```"):
@@ -281,7 +458,7 @@ def _apply_memory(memory_actions):
     return current
 
 
-def _agent_chat(prompt, auto_run=True, force_run=False, persist_active=False, mode="coding"):
+def _agent_chat(prompt, auto_run=True, force_run=False, persist_active=False, mode="coding", append_user_log=True):
     settings = _agent_settings()
     if not bool(settings.get("enabled", True)):
         return {
@@ -289,7 +466,8 @@ def _agent_chat(prompt, auto_run=True, force_run=False, persist_active=False, mo
             "error": "agent disabled",
         }
 
-    _append_agent_log("user", prompt)
+    if append_user_log:
+        _append_agent_log("user", prompt)
 
     messages = _build_agent_messages(prompt, mode=mode)
     ok, err, data = _http_chat_completion(messages)
@@ -316,57 +494,132 @@ def _agent_chat(prompt, auto_run=True, force_run=False, persist_active=False, mo
 
     ai_text = str(choices[0].get("message", {}).get("content", "") or "")
     thinking_text = _extract_reasoning_text(data)
-    _append_agent_log("assistant", ai_text)
+    return _build_agent_result_from_ai_text(
+        ai_text,
+        thinking_text,
+        auto_run=auto_run,
+        force_run=force_run,
+        persist_active=persist_active,
+        mode=mode,
+    )
 
+
+def _sse_send_event(client, payload):
     try:
-        ai_obj = _extract_json_payload(ai_text)
-    except Exception as e:
-        return {
-            "ok": False,
-            "error": "invalid JSON from model: %s" % e,
-            "raw": ai_text,
-        }
+        line = "data: " + st.json.dumps(payload) + "\n\n"
+        client.send(line.encode("utf-8"))
+    except Exception:
+        pass
 
-    code_text = str(ai_obj.get("code", "") or "").strip()
-    notes = str(ai_obj.get("notes", "") or "")
-    memory = _apply_memory(ai_obj.get("memory", {}))
 
-    auto_save_draft = bool(settings.get("autoSaveDraft", True))
-    if code_text and auto_save_draft:
-        atomic_write_text(st.CODE_DRAFT_FILE, code_text + "\n")
+def _sse_send_done(client):
+    try:
+        client.send(b"data: [DONE]\n\n")
+    except Exception:
+        pass
 
-    run_info = {"started": False, "error": "", "jobId": ""}
-    if auto_run and code_text:
-        if force_run and runtime_get("running", False):
-            runtime_set_many({"stopRequested": True})
-            # Cooperative stop wait.
-            deadline = time.time() + 4
-            while runtime_get("running", False) and time.time() < deadline:
-                time.sleep(0.1)
 
-        job_id, run_err = start_code_run(code_text, "agent_chat")
-        if job_id:
-            run_info = {"started": True, "error": "", "jobId": job_id}
+def _send_agent_chat_sse(client, prompt, auto_run, force_run, persist_active, mode):
+    headers = (
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/event-stream; charset=utf-8\r\n"
+        "Connection: close\r\n"
+        "Cache-Control: no-store\r\n"
+        "\r\n"
+    )
+    try:
+        client.send(headers.encode("utf-8"))
+    except Exception:
+        return
+
+    settings = _agent_settings()
+    if not bool(settings.get("enabled", True)):
+        _sse_send_event(client, {"type": "error", "error": "agent disabled"})
+        _sse_send_done(client)
+        return
+
+    _sse_send_event(client, {"type": "status", "stage": "started"})
+    _append_agent_log("user", prompt)
+
+    messages = _build_agent_messages(prompt, mode=mode)
+    ok, err, resp = _http_chat_completion_stream(messages)
+    if (not ok) and str(err).startswith("upstream HTTP 400"):
+        # Keep compact retry to avoid request truncation issues.
+        system_prompt = _resolve_mode_prompt(settings, mode)
+        minimal = [
+            {"role": "system", "content": _safe_text(system_prompt, 1200)},
+            {"role": "user", "content": _safe_text(prompt, 800)},
+        ]
+        ok, err, resp = _http_chat_completion_stream(minimal)
+
+    if not ok:
+        ret = _agent_chat(
+            prompt,
+            auto_run=auto_run,
+            force_run=force_run,
+            persist_active=persist_active,
+            mode=mode,
+            append_user_log=False,
+        )
+        if ret.get("ok"):
+            _sse_send_event(client, {"type": "status", "stage": "fallback_non_stream"})
+            thinking = str(ret.get("thinking", "") or "")
+            if thinking:
+                chunk = 24
+                idx = 0
+                while idx < len(thinking):
+                    _sse_send_event(client, {"type": "thinking_delta", "delta": thinking[idx:idx + chunk]})
+                    idx += chunk
+                    time.sleep(0.035)
+            _sse_send_event(client, {"type": "final", "data": ret})
         else:
-            run_info = {"started": False, "error": run_err, "jobId": ""}
+            _sse_send_event(client, {"type": "error", "error": ret.get("error", err or "agent error")})
+        _sse_send_done(client)
+        return
 
-    # Optional: persist generated code as active version.
-    if persist_active and code_text and (not runtime_get("running", False)):
+    full_thinking = ""
+    full_content = ""
+    try:
+        for raw_line in _iter_upstream_sse_lines(resp):
+            line = str(raw_line or "").strip()
+            if not line or (not line.startswith("data:")):
+                continue
+            payload = line[5:].strip()
+            if not payload:
+                continue
+            if payload == "[DONE]":
+                break
+            try:
+                evt = st.json.loads(payload)
+            except Exception:
+                continue
+            thinking_delta, content_delta = _extract_stream_choice_fields(evt)
+            if thinking_delta:
+                full_thinking += thinking_delta
+                _sse_send_event(client, {"type": "thinking_delta", "delta": thinking_delta})
+            if content_delta:
+                full_content += content_delta
+    finally:
         try:
-            atomic_write_text(st.CODE_ACTIVE_FILE, code_text + "\n")
+            resp.close()
         except Exception:
             pass
 
-    return {
-        "ok": True,
-        "mode": mode,
-        "code": code_text,
-        "notes": notes,
-        "thinking": thinking_text,
-        "memory": memory,
-        "run": run_info,
-        "raw": ai_text,
-    }
+    ret = _build_agent_result_from_ai_text(
+        full_content,
+        full_thinking,
+        auto_run=auto_run,
+        force_run=force_run,
+        persist_active=persist_active,
+        mode=mode,
+    )
+
+    if ret.get("ok"):
+        _sse_send_event(client, {"type": "final", "data": ret})
+    else:
+        _sse_send_event(client, {"type": "error", "error": ret.get("error", "agent error")})
+
+    _sse_send_done(client)
 
 
 def handle_agent_api(client, method, api_path, _query_string, body):
@@ -429,6 +682,11 @@ def handle_agent_api(client, method, api_path, _query_string, body):
             auto_run = False
         force_run = bool(data.get("forceRun", True))
         persist_active = bool(data.get("persistActive", False))
+        stream = bool(data.get("stream", False))
+
+        if stream:
+            _send_agent_chat_sse(client, prompt, auto_run, force_run, persist_active, mode)
+            return True
 
         ret = _agent_chat(prompt, auto_run=auto_run, force_run=force_run, persist_active=persist_active, mode=mode)
         if ret.get("ok"):

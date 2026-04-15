@@ -269,20 +269,95 @@ function normalizeAgentPrompt(userText) {
   return t;
 }
 
-async function requestAgentChat(prompt, mode = 'coding') {
+function updateThinkingBlock(msgEl, text, done) {
+  const tb = msgEl.querySelector('.thinking-block');
+  const tc = msgEl.querySelector('.thinking-content');
+  const th = msgEl.querySelector('.thinking-header');
+  const tt = msgEl.querySelector('.thinking-title');
+  const td = msgEl.querySelector('.thinking-dot');
+  const safe = String(text || '');
+
+  if (!tb) return;
+  if (!safe) {
+    tb.style.display = 'none';
+    return;
+  }
+
+  tb.style.display = 'block';
+  if (tc) {
+    tc.classList.add('open');
+    tc.textContent = safe;
+    tc.scrollTop = tc.scrollHeight;
+  }
+  if (th) th.classList.add('open');
+  if (tt) tt.textContent = done ? `思考过程（${safe.length} 字）` : `思考中…（${safe.length} 字）`;
+  if (td) td.classList.toggle('done', !!done);
+}
+
+async function streamTextGradually(text, onUpdate, signal, chunkSize = 20, intervalMs = 16) {
+  const source = String(text || '');
+  if (!source) {
+    onUpdate('');
+    return;
+  }
+
+  let idx = 0;
+  while (idx < source.length) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    idx += chunkSize;
+    onUpdate(source.slice(0, idx));
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+}
+
+async function requestAgentChat(prompt, mode = 'coding', signal = null, onEvent = null) {
   const safeMode = ['normal', 'coding', 'react'].includes(String(mode || '')) ? String(mode) : 'coding';
   const autoRun = safeMode === 'coding';
   const res = await fetch('/api/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       prompt,
       mode: safeMode,
       autoRun,
       forceRun: true,
       persistActive: false,
+      stream: true,
     }),
   });
+
+  const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+  if (res.ok && contentType.includes('text/event-stream') && res.body) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalPayload = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          const evt = JSON.parse(payload);
+          if (onEvent) onEvent(evt);
+          if (evt.type === 'final' && evt.data) finalPayload = evt.data;
+        } catch (e) {
+          console.warn('Agent stream parse error:', e);
+        }
+      }
+    }
+
+    if (finalPayload) return finalPayload;
+  }
+
   let data = null;
   try {
     data = await res.json();
@@ -301,7 +376,45 @@ async function agentCodeResponse(userText, assistantMsg, msgEl, startTime, conv,
     throw new Error('请输入 /code 后面的编程需求');
   }
 
-  const ret = await requestAgentChat(prompt, mode);
+  let streamThinking = '';
+  const ret = await requestAgentChat(prompt, mode, abortController?.signal || null, evt => {
+    if (!evt || typeof evt !== 'object') return;
+    if (evt.type === 'thinking_delta') {
+      streamThinking += String(evt.delta || '');
+      assistantMsg.thinking = streamThinking;
+      updateThinkingBlock(msgEl, streamThinking, false);
+    }
+  });
+
+  const finalThinking = String(ret.thinking || '');
+  if (!streamThinking && finalThinking) {
+    await streamTextGradually(
+      finalThinking,
+      text => {
+        assistantMsg.thinking = text;
+        updateThinkingBlock(msgEl, text, false);
+      },
+      abortController?.signal || null,
+      18,
+      15
+    );
+  } else if (streamThinking && finalThinking.length > streamThinking.length) {
+    await streamTextGradually(
+      finalThinking,
+      text => {
+        assistantMsg.thinking = text;
+        updateThinkingBlock(msgEl, text, false);
+      },
+      abortController?.signal || null,
+      18,
+      15
+    );
+  } else {
+    assistantMsg.thinking = streamThinking || finalThinking;
+  }
+
+  updateThinkingBlock(msgEl, assistantMsg.thinking, !!assistantMsg.thinking);
+
   const run = ret.run || {};
   const lines = [];
   lines.push(`AI ${ret.mode || getChatMode()} 模式任务已执行`);
@@ -318,8 +431,6 @@ async function agentCodeResponse(userText, assistantMsg, msgEl, startTime, conv,
   }
 
   assistantMsg.content = lines.join('\n\n');
-  assistantMsg.thinking = String(ret.thinking || '');
-
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
   const inTokens = Math.ceil(String(userText || '').length * 0.6);
   const outTokens = Math.ceil(assistantMsg.content.length * 0.5);
@@ -351,6 +462,7 @@ async function generateResponse(conv, userText = '') {
   abortController = new AbortController();
   setSendBtnState('stop');
   const startTime = Date.now();
+  const mode = resolveRuntimeMode(userText);
 
   const assistantMsg = {
     role: 'assistant',
@@ -365,16 +477,18 @@ async function generateResponse(conv, userText = '') {
   el.messageList.appendChild(msgEl);
   scrollToBottom();
 
-  const apiMessages = buildApiMessages(conv);
   let finalStats = null;
 
   try {
-    const mode = resolveRuntimeMode(userText);
     if (mode === 'coding' || mode === 'react') {
       finalStats = await agentCodeResponse(userText, assistantMsg, msgEl, startTime, conv, mode);
     } else if (config.stream) {
+      const modePrompt = resolveChatModePrompt(mode);
+      const apiMessages = buildApiMessages(conv, modePrompt);
       finalStats = await streamResponse(apiMessages, assistantMsg, msgEl, startTime, conv);
     } else {
+      const modePrompt = resolveChatModePrompt(mode);
+      const apiMessages = buildApiMessages(conv, modePrompt);
       finalStats = await normalResponse(apiMessages, assistantMsg, msgEl, startTime, conv);
     }
   } catch(e) {
@@ -429,11 +543,12 @@ async function generateResponse(conv, userText = '') {
 }
 
 // ─── 构建 API 请求消息 ────────────────────────────────────
-function buildApiMessages(conv) {
+function buildApiMessages(conv, systemPromptOverride = null) {
   const messages = [];
 
-  if (config.systemPrompt) {
-    messages.push({ role: 'system', content: config.systemPrompt });
+  const systemPrompt = String(systemPromptOverride == null ? (config.systemPrompt || '') : systemPromptOverride || '');
+  if (systemPrompt) {
+    messages.push({ role: 'system', content: systemPrompt });
   }
 
   const history = conv.messages.slice(0, -1);
@@ -764,7 +879,7 @@ function createUserMessageEl(msg) {
       ${attachmentHTML}
       <div class="message-content">${escapeHtml(msg.content)}</div>
       <div class="message-toolbar">
-        <button class="toolbar-btn" onclick="copyText(this, ${JSON.stringify(msg.content)})">复制</button>
+        <button class="toolbar-btn" onclick="copyMsgContent(this)">复制</button>
       </div>
     </div>
   `;
