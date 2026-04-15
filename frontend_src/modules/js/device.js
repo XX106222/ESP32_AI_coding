@@ -3,6 +3,7 @@ var codeHistoryItems = [];
 var selectedCodeHistoryVersion = '';
 var selectedCodeHistoryCode = '';
 var codeRunTransitioning = false;
+var codeSwitchSaving = false;
 
 function sleepMs(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -21,62 +22,14 @@ function setCodeRunButtonsState(running, switching = false) {
   }
 
   if (el.codeStopBtn) {
-    // 空闲时停止按钮填充，运行时停止按钮描边。
-    el.codeStopBtn.classList.toggle('code-btn-filled', !isRunning && !isSwitching);
-    el.codeStopBtn.classList.toggle('code-btn-outline', isRunning || isSwitching);
-    el.codeStopBtn.disabled = isSwitching;
+    // 停止按钮保持描边，避免与“运行中填充”语义冲突。
+    el.codeStopBtn.classList.remove('code-btn-filled');
+    el.codeStopBtn.classList.add('code-btn-outline');
+    el.codeStopBtn.disabled = isSwitching || !isRunning;
   }
 
   if (el.codePersistBtn) {
     el.codePersistBtn.disabled = isSwitching || isRunning;
-  }
-}
-
-function setCodeLimitsFormEnabled(enabled) {
-  const on = !!enabled;
-  if (el.codeCfgLimitsEnabled) el.codeCfgLimitsEnabled.checked = on;
-  const group = el.codeCfgLimitsGroup;
-  if (group) {
-    group.classList.toggle('disabled', !on);
-    const fields = group.querySelectorAll('input, textarea, select, button');
-    fields.forEach(node => {
-      node.disabled = !on;
-    });
-  }
-}
-
-async function setBootAutorunEnabled(enabled, silent = false) {
-  try {
-    const current = await apiGet('/code/config');
-    const payload = {
-      ...current,
-      bootAutorunEnabled: !!enabled,
-    };
-    const res = await apiPost('/code/config', payload);
-    if (el.codeBootAutorunEnabled) {
-      el.codeBootAutorunEnabled.checked = !!res?.config?.bootAutorunEnabled;
-    }
-    if (!silent) showToast(payload.bootAutorunEnabled ? '已开启开机运行' : '已关闭开机运行');
-  } catch (e) {
-    if (el.codeBootAutorunEnabled) {
-      el.codeBootAutorunEnabled.checked = !enabled;
-    }
-    if (!silent) showToast('保存开机运行开关失败: ' + e.message);
-  }
-}
-
-function bindCodeConfigSwitches() {
-  if (el.codeBootAutorunEnabled && !el.codeBootAutorunEnabled.__bindDone) {
-    el.codeBootAutorunEnabled.addEventListener('change', () => {
-      setBootAutorunEnabled(!!el.codeBootAutorunEnabled.checked, false);
-    });
-    el.codeBootAutorunEnabled.__bindDone = true;
-  }
-  if (el.codeCfgLimitsEnabled && !el.codeCfgLimitsEnabled.__bindDone) {
-    el.codeCfgLimitsEnabled.addEventListener('change', () => {
-      setCodeLimitsFormEnabled(!!el.codeCfgLimitsEnabled.checked);
-    });
-    el.codeCfgLimitsEnabled.__bindDone = true;
   }
 }
 
@@ -104,7 +57,7 @@ function renderCodeHistoryList(activeVersion = '') {
     return;
   }
 
-  const cards = codeHistoryItems.map(item => {
+  el.codeHistoryList.innerHTML = codeHistoryItems.map(item => {
     const version = String(item?.version || '');
     const savedAt = formatHistoryTime(item?.savedAt);
     const note = String(item?.note || '').trim();
@@ -116,7 +69,6 @@ function renderCodeHistoryList(activeVersion = '') {
     const deleteDisabled = active ? 'disabled title="当前固化版本不可删除"' : 'title="删除该历史版本"';
     return `<div class="code-history-row"><button class="${cls}" data-action="view" data-version="${escapeHtml(version)}"><b class="code-history-item-title">版本 v${escapeHtml(version)} ${badge}</b><span class="code-history-item-meta">${savedAt}${noteText}</span></button><button class="code-history-delete" data-action="delete" data-version="${escapeHtml(version)}" ${deleteDisabled}>删除</button></div>`;
   }).join('');
-  el.codeHistoryList.innerHTML = cards;
 }
 
 function renderCodeHistoryPreview(meta, code) {
@@ -602,6 +554,101 @@ async function loadCodeActive() {
   }
 }
 
+function setCodeLimitsFormEnabled(enabled) {
+  const on = !!enabled;
+  if (el.codeCfgLimitsEnabled) el.codeCfgLimitsEnabled.checked = on;
+  if (el.codeCfgLimitsGroup) {
+    el.codeCfgLimitsGroup.classList.toggle('disabled', !on);
+    const fields = el.codeCfgLimitsGroup.querySelectorAll('input, textarea, select, button');
+    fields.forEach(node => {
+      node.disabled = !on;
+    });
+  }
+}
+
+async function setBootAutorunEnabled(enabled, silent = false) {
+  try {
+    codeSwitchSaving = true;
+    const cfg = await apiGet('/code/config');
+    const payload = { ...cfg, bootAutorunEnabled: !!enabled };
+    const res = await apiPost('/code/config', payload);
+    if (el.codeBootAutorunEnabled) {
+      el.codeBootAutorunEnabled.checked = !!res?.config?.bootAutorunEnabled;
+    }
+    if (!silent) showToast(payload.bootAutorunEnabled ? '已开启开机运行' : '已关闭开机运行');
+  } catch (e) {
+    if (el.codeBootAutorunEnabled) el.codeBootAutorunEnabled.checked = !enabled;
+    if (!silent) showToast('保存开机运行失败: ' + e.message);
+  } finally {
+    codeSwitchSaving = false;
+  }
+}
+
+async function setLimitsEnabled(enabled, silent = false) {
+  try {
+    codeSwitchSaving = true;
+    const on = !!enabled;
+    setCodeLimitsFormEnabled(on);
+
+    const cfg = await apiGet('/code/config');
+    let payload = { ...cfg, limitsEnabled: on };
+
+    if (!on) {
+      // 关闭限制后立即落盘为无限制配置。
+      payload = {
+        ...payload,
+        codeTextLimit: 0,
+        callBudget: 0,
+        iterBudget: 0,
+        outputMaxChars: 0,
+        outputMaxLines: 0,
+        httpHeaderMaxBytes: 0,
+        httpBodyMaxBytes: 0,
+        heartbeatIntervalMs: 0,
+        heartbeatStallMs: 0,
+        importBlocklist: [],
+      };
+      if (el.codeCfgTextLimit) el.codeCfgTextLimit.value = '0';
+      if (el.codeCfgCallBudget) el.codeCfgCallBudget.value = '0';
+      if (el.codeCfgIterBudget) el.codeCfgIterBudget.value = '0';
+      if (el.codeCfgOutputChars) el.codeCfgOutputChars.value = '0';
+      if (el.codeCfgOutputLines) el.codeCfgOutputLines.value = '0';
+      if (el.codeCfgHttpHeader) el.codeCfgHttpHeader.value = '0';
+      if (el.codeCfgHttpBody) el.codeCfgHttpBody.value = '0';
+      if (el.codeCfgHeartbeatInterval) el.codeCfgHeartbeatInterval.value = '0';
+      if (el.codeCfgHeartbeatStall) el.codeCfgHeartbeatStall.value = '0';
+      if (el.codeCfgImportBlocklist) el.codeCfgImportBlocklist.value = '';
+    }
+
+    const res = await apiPost('/code/config', payload);
+    setCodeConfigForm(res?.config || payload);
+    if (!silent) showToast(on ? '已开启运行限制并保存' : '已关闭运行限制并保存');
+  } catch (e) {
+    if (el.codeCfgLimitsEnabled) el.codeCfgLimitsEnabled.checked = !enabled;
+    setCodeLimitsFormEnabled(!enabled);
+    if (!silent) showToast('保存运行限制开关失败: ' + e.message);
+  } finally {
+    codeSwitchSaving = false;
+  }
+}
+
+function bindCodeConfigSwitches() {
+  if (el.codeBootAutorunEnabled && !el.codeBootAutorunEnabled.__bound) {
+    el.codeBootAutorunEnabled.addEventListener('change', () => {
+      if (codeSwitchSaving) return;
+      setBootAutorunEnabled(!!el.codeBootAutorunEnabled.checked, false);
+    });
+    el.codeBootAutorunEnabled.__bound = true;
+  }
+  if (el.codeCfgLimitsEnabled && !el.codeCfgLimitsEnabled.__bound) {
+    el.codeCfgLimitsEnabled.addEventListener('change', () => {
+      if (codeSwitchSaving) return;
+      setLimitsEnabled(!!el.codeCfgLimitsEnabled.checked, false);
+    });
+    el.codeCfgLimitsEnabled.__bound = true;
+  }
+}
+
 async function saveCodeDraft() {
   try {
     await apiPost('/code/draft', { code: el.codeEditor?.value || '' });
@@ -612,9 +659,8 @@ async function saveCodeDraft() {
 }
 
 function setCodeConfigForm(cfg = {}) {
-  const limitsEnabled = cfg?.limitsEnabled !== false;
-  const bootAutorunEnabled = !!cfg?.bootAutorunEnabled;
-  if (el.codeBootAutorunEnabled) el.codeBootAutorunEnabled.checked = bootAutorunEnabled;
+  const limitsEnabled = cfg.limitsEnabled !== false;
+  if (el.codeBootAutorunEnabled) el.codeBootAutorunEnabled.checked = !!cfg.bootAutorunEnabled;
   setCodeLimitsFormEnabled(limitsEnabled);
 
   if (el.codeCfgTextLimit) el.codeCfgTextLimit.value = cfg.codeTextLimit ?? '';
@@ -700,6 +746,8 @@ async function saveCodeConfig() {
 
 async function resetCodeConfigDefaults() {
   const defaults = {
+    limitsEnabled: true,
+    bootAutorunEnabled: false,
     codeTextLimit: 12000,
     callBudget: 6000,
     iterBudget: 2000,
@@ -711,14 +759,9 @@ async function resetCodeConfigDefaults() {
     heartbeatStallMs: 5000,
     importBlocklist: ['os', 'uos', 'sys', 'socket', 'usocket', 'network', '_thread', 'threading', 'subprocess', 'select', 'ssl', 'asyncio', 'uasyncio'],
   };
-  try {
-    const res = await apiPost('/code/config', defaults);
-    setCodeConfigForm(res?.config || defaults);
-    showToast('已恢复默认配置并保存到 Flash');
-    refreshCodeStatus(true);
-  } catch (e) {
-    showToast('恢复默认配置失败: ' + e.message);
-  }
+  setCodeConfigForm(defaults);
+  showToast('已恢复默认配置到输入框，点击“保存配置”才会写入 Flash');
+  refreshCodeStatus(true);
 }
 
 async function stopCodeRun() {
@@ -829,6 +872,9 @@ async function refreshCodeStatus(silent = false) {
     setCodeRunButtonsState(!!data?.running, codeRunTransitioning);
     if (el.codeBootAutorunEnabled && data?.config && Object.prototype.hasOwnProperty.call(data.config, 'bootAutorunEnabled')) {
       el.codeBootAutorunEnabled.checked = !!data.config.bootAutorunEnabled;
+    }
+    if (data?.config && Object.prototype.hasOwnProperty.call(data.config, 'limitsEnabled')) {
+      setCodeLimitsFormEnabled(!!data.config.limitsEnabled);
     }
 
     const log = await apiGet('/code/log');
