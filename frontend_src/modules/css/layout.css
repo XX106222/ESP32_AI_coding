@@ -142,6 +142,30 @@
   gap: 8px;
 }
 
+.code-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: var(--text2);
+}
+
+.switch-label input[type="checkbox"] {
+  width: 34px;
+  height: 18px;
+}
+
+#codeCfgLimitsGroup.disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 #codeConfigPanel {
   border: 1px dashed var(--border2);
   border-radius: 8px;
@@ -413,6 +437,19 @@ input[type="range"]::-webkit-slider-thumb {
   width: 100%;
 }
 .btn-secondary:hover { background: var(--bg4); color: var(--text); }
+
+/* 代码运行状态按钮：filled 表示运行态，outline 表示非运行态。 */
+.code-btn-filled {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border: 1px solid var(--accent) !important;
+}
+
+.code-btn-outline {
+  background: var(--bg3) !important;
+  color: var(--text2) !important;
+  border: 1px solid var(--border) !important;
+}
 
 .icon-btn {
   background: none;

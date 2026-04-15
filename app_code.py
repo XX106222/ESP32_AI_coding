@@ -85,6 +85,9 @@ def sanitize_runtime_config(data):
         data = {}
     base = st.DEFAULT_CODE_RUNTIME_CONFIG
 
+    limits_enabled = bool(data.get("limitsEnabled", True))
+    boot_autorun_enabled = bool(data.get("bootAutorunEnabled", False))
+
     import_blocklist = data.get("importBlocklist", None)
     # 兼容旧配置：若只有白名单字段，自动迁移到默认黑名单
     if import_blocklist is None and isinstance(data.get("importWhitelist"), list):
@@ -98,11 +101,13 @@ def sanitize_runtime_config(data):
             continue
         if s not in safe_blocklist:
             safe_blocklist.append(s)
-    if not safe_blocklist:
+    if not safe_blocklist and limits_enabled:
         safe_blocklist = list(base["importBlocklist"])
 
     heartbeat_stall_src = data.get("heartbeatStallMs", data.get("timeoutMs", base["heartbeatStallMs"]))
     return {
+        "limitsEnabled": limits_enabled,
+        "bootAutorunEnabled": boot_autorun_enabled,
         "codeTextLimit": _to_int(data.get("codeTextLimit", base["codeTextLimit"]), base["codeTextLimit"], 0, 600000),
         "callBudget": _to_int(data.get("callBudget", base["callBudget"]), base["callBudget"], 0, 1000000),
         "iterBudget": _to_int(data.get("iterBudget", base["iterBudget"]), base["iterBudget"], 0, 1000000),
@@ -117,17 +122,35 @@ def sanitize_runtime_config(data):
 
 
 def apply_runtime_config(cfg):
-    st.CODE_MAX_TEXT = cfg["codeTextLimit"]
-    st.CODE_RUN_TIMEOUT_MS = cfg["heartbeatStallMs"]
-    st.CODE_MAX_CALLS = cfg["callBudget"]
-    st.CODE_MAX_RANGE_ITEMS = cfg["iterBudget"]
-    st.CODE_OUTPUT_MAX_CHARS = cfg["outputMaxChars"]
-    st.CODE_OUTPUT_MAX_LINES = cfg["outputMaxLines"]
-    st.MAX_HEADER_BYTES = cfg["httpHeaderMaxBytes"]
-    st.MAX_BODY_BYTES = cfg["httpBodyMaxBytes"]
-    st.CODE_IMPORT_BLOCKLIST = tuple(cfg["importBlocklist"])
-    st.CODE_LOOP_HEARTBEAT_INTERVAL_MS = cfg["heartbeatIntervalMs"]
-    st.CODE_LOOP_STALL_MS = cfg["heartbeatStallMs"]
+    limits_enabled = bool(cfg.get("limitsEnabled", True))
+    st.CODE_LIMITS_ENABLED = limits_enabled
+    st.CODE_BOOT_AUTORUN_ENABLED = bool(cfg.get("bootAutorunEnabled", False))
+
+    if limits_enabled:
+        st.CODE_MAX_TEXT = cfg["codeTextLimit"]
+        st.CODE_RUN_TIMEOUT_MS = cfg["heartbeatStallMs"]
+        st.CODE_MAX_CALLS = cfg["callBudget"]
+        st.CODE_MAX_RANGE_ITEMS = cfg["iterBudget"]
+        st.CODE_OUTPUT_MAX_CHARS = cfg["outputMaxChars"]
+        st.CODE_OUTPUT_MAX_LINES = cfg["outputMaxLines"]
+        st.MAX_HEADER_BYTES = cfg["httpHeaderMaxBytes"]
+        st.MAX_BODY_BYTES = cfg["httpBodyMaxBytes"]
+        st.CODE_IMPORT_BLOCKLIST = tuple(cfg["importBlocklist"])
+        st.CODE_LOOP_HEARTBEAT_INTERVAL_MS = cfg["heartbeatIntervalMs"]
+        st.CODE_LOOP_STALL_MS = cfg["heartbeatStallMs"]
+    else:
+        # 关闭运行限制时，预算/上限全部设为 0，黑名单清空。
+        st.CODE_MAX_TEXT = 0
+        st.CODE_RUN_TIMEOUT_MS = 0
+        st.CODE_MAX_CALLS = 0
+        st.CODE_MAX_RANGE_ITEMS = 0
+        st.CODE_OUTPUT_MAX_CHARS = 0
+        st.CODE_OUTPUT_MAX_LINES = 0
+        st.MAX_HEADER_BYTES = 0
+        st.MAX_BODY_BYTES = 0
+        st.CODE_IMPORT_BLOCKLIST = ()
+        st.CODE_LOOP_HEARTBEAT_INTERVAL_MS = 0
+        st.CODE_LOOP_STALL_MS = 0
 
     runtime_set_many({
         "limits": {
@@ -138,12 +161,15 @@ def apply_runtime_config(cfg):
             "maxRangeItems": st.CODE_MAX_RANGE_ITEMS,
             "heartbeatIntervalMs": st.CODE_LOOP_HEARTBEAT_INTERVAL_MS,
             "heartbeatStallMs": st.CODE_LOOP_STALL_MS,
+            "enabled": st.CODE_LIMITS_ENABLED,
         }
     })
 
 
 def get_runtime_config():
     return {
+        "limitsEnabled": bool(getattr(st, "CODE_LIMITS_ENABLED", True)),
+        "bootAutorunEnabled": bool(getattr(st, "CODE_BOOT_AUTORUN_ENABLED", False)),
         "codeTextLimit": st.CODE_MAX_TEXT,
         "callBudget": st.CODE_MAX_CALLS,
         "iterBudget": st.CODE_MAX_RANGE_ITEMS,
@@ -441,6 +467,35 @@ def start_code_run(code_text, source):
         return None, "failed to start run thread"
 
     return job_id, ""
+
+
+def boot_autorun_active_code():
+    if not bool(getattr(st, "CODE_BOOT_AUTORUN_ENABLED", False)):
+        append_run_log("boot autorun skipped: switch is off")
+        runtime_set_many({"lastNote": "boot autorun skipped: switch is off"})
+        return {"started": False, "reason": "disabled"}
+
+    code_text = read_text(st.CODE_ACTIVE_FILE, "")
+    stripped = code_text.strip()
+    if not stripped:
+        append_run_log("boot autorun skipped: active code is empty")
+        runtime_set_many({"lastNote": "boot autorun skipped: active code is empty"})
+        return {"started": False, "reason": "empty"}
+
+    # Skip the default placeholder text to avoid launching a no-op thread on first boot.
+    if stripped == "# 当前固化代码为空":
+        append_run_log("boot autorun skipped: active code is placeholder")
+        runtime_set_many({"lastNote": "boot autorun skipped: active code is placeholder"})
+        return {"started": False, "reason": "placeholder"}
+
+    job_id, err = start_code_run(code_text, "boot_active")
+    if not job_id:
+        append_run_log("boot autorun skipped: " + err)
+        runtime_set_many({"lastNote": "boot autorun skipped: " + err})
+        return {"started": False, "reason": err}
+
+    append_run_log("boot autorun started job=" + job_id)
+    return {"started": True, "jobId": job_id}
 
 
 def save_active_from_draft(note=""):

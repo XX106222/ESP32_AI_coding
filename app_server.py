@@ -9,7 +9,6 @@ from app_common import (
     parse_json_body,
     read_json,
     read_request,
-    read_text,
     sanitize_path,
     send_file,
     send_json,
@@ -17,7 +16,7 @@ from app_common import (
     split_path_query,
     ensure_dir,
 )
-from app_code import code_prepare_dirs, handle_code_api
+from app_code import boot_autorun_active_code, code_prepare_dirs, handle_code_api
 from app_device import (
     can_use_gpio,
     init_board_led,
@@ -31,6 +30,13 @@ from app_device import (
 
 # 兼容 MicroPython，避免在 import 阶段做复杂引用
 _ = None
+
+
+def _safe_int(value, default_value):
+    try:
+        return int(value)
+    except Exception:
+        return int(default_value)
 
 
 def connect_wifi(ssid, password, timeout_sec=20):
@@ -132,11 +138,11 @@ def route_request(client, method, path, body, wlan):
                     return
                 data = parse_json_body(body) or {}
                 on = bool(data.get("on", True))
-                r = int(data.get("r", st.BOARD_LED_STATE["r"]))
-                g = int(data.get("g", st.BOARD_LED_STATE["g"]))
-                b = int(data.get("b", st.BOARD_LED_STATE["b"]))
+                r = _safe_int(data.get("r", st.BOARD_LED_STATE["r"]), st.BOARD_LED_STATE["r"])
+                g = _safe_int(data.get("g", st.BOARD_LED_STATE["g"]), st.BOARD_LED_STATE["g"])
+                b = _safe_int(data.get("b", st.BOARD_LED_STATE["b"]), st.BOARD_LED_STATE["b"])
                 mode = str(data.get("mode", "static"))
-                interval_ms = int(data.get("interval_ms", 120))
+                interval_ms = _safe_int(data.get("interval_ms", 120), 120)
                 palette = data.get("palette")
 
                 st.LED_ANIM["mode"] = mode if mode in ("static", "breath", "blink_fast", "blink_slow", "multi_flash") else "static"
@@ -496,5 +502,16 @@ def main():
 
     wlan, ip = connect_wifi(WIFI_SSID, WIFI_PASSWORD)
     print("[READY] 浏览器打开: http://%s" % ip)
+
+    try:
+        ret = boot_autorun_active_code()
+        if ret.get("started"):
+            print("[CODE] 开机自启动已启动, job:", ret.get("jobId", ""))
+        else:
+            print("[CODE] 开机自启动跳过:", ret.get("reason", ""))
+    except Exception as e:
+        # Never break the web service startup because of autorun failures.
+        print("[CODE] 开机自启动异常:", e)
+
     run_server(wlan)
 

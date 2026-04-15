@@ -188,13 +188,13 @@
   </div>
 
   <div class="panel" id="panel-code" style="display:none">
-    <div class="panel-title-row"><h3 class="panel-title">调试 · 运行 · 固化</h3><button class="icon-btn" id="codeConfigToggleBtn" title="运行配置">⚙</button></div>
+    <div class="panel-title-row"><h3 class="panel-title">调试 · 运行 · 固化</h3><div class="code-title-actions"><label class="switch-label" title="打开后开机自动运行当前固化代码"><input type="checkbox" id="codeBootAutorunEnabled" /><span>开机运行</span></label><button class="icon-btn" id="codeConfigToggleBtn" title="运行配置">⚙</button></div></div>
     <div class="form-group"><label>代码来源</label><select id="codeRunSource"><option value="draft">草稿运行</option><option value="active">当前固化版本运行</option></select></div>
     <div class="form-group"><label>草稿代码</label><textarea id="codeEditor" rows="12" placeholder="# 使用 gpio_write / gpio_read / led_set / servo_angle / servo_speed\nprint('hello')"></textarea></div>
 
     <div class="form-row code-action-row"><button class="btn-secondary" id="codeLoadDraftBtn">加载草稿</button><button class="btn-secondary" id="codeSaveDraftBtn">保存草稿</button></div>
-    <div class="form-row code-action-row"><button class="btn-secondary" id="codeLoadActiveBtn">加载代码</button><button class="btn-primary" id="codePersistBtn">固化草稿为当前版本</button></div>
-    <div class="form-row code-action-row"><button class="btn-primary" id="codeRunBtn">运行</button><button class="btn-secondary" id="codeStopBtn">停止</button></div>
+    <div class="form-row code-action-row"><button class="btn-secondary" id="codeLoadActiveBtn">加载代码</button><button class="btn-secondary" id="codePersistBtn">固化草稿为当前版本</button></div>
+    <div class="form-row code-action-row"><button class="btn-secondary" id="codeRunBtn">运行</button><button class="btn-secondary" id="codeStopBtn">停止</button></div>
     <div class="form-row code-action-row"><button class="btn-secondary" id="codeRefreshStatusBtn">刷新状态</button></div>
 
     <div class="code-history-box">
@@ -202,7 +202,7 @@
       <div class="code-history-list" id="codeHistoryList">—</div>
       <div class="code-history-meta" id="codeHistoryMeta">—</div>
       <pre class="code-log code-history-preview" id="codeHistoryPreview">—</pre>
-      <div class="form-row code-action-row"><button class="btn-secondary" id="codeHistoryLoadDraftBtn">恢复到草稿</button><button class="btn-primary" id="codeHistoryPersistBtn">设为当前固化</button></div>
+      <div class="form-row code-action-row"><button class="btn-secondary" id="codeHistoryLoadDraftBtn">恢复到草稿</button><button class="btn-secondary" id="codeHistoryPersistBtn">设为当前固化</button></div>
     </div>
 
     <div class="code-runtime-box">
@@ -294,6 +294,8 @@
       <button class="modal-close" id="codeConfigModalClose">✕</button>
     </div>
     <div class="runtime-config-body">
+      <div class="runtime-item runtime-item-wide"><label>运行限制开关</label><label class="switch-label"><input type="checkbox" id="codeCfgLimitsEnabled" /><span>启用运行限制</span></label><span class="unit">关闭后将预算/上限设为 0，黑名单清空（无限制）</span></div>
+      <div id="codeCfgLimitsGroup">
       <div class="runtime-item"><label>代码文本上限</label><input type="number" id="codeCfgTextLimit" /><span class="unit">字符</span><button class="info-dot" data-help="限制草稿/运行代码最大长度；0 表示不限制。">!</button></div>
       <div class="runtime-item"><label>调用预算</label><input type="number" id="codeCfgCallBudget" /><span class="unit">次</span><button class="info-dot" data-help="限制函数/API 总调用次数；0 表示不限制。">!</button></div>
       <div class="runtime-item"><label>可迭代预算</label><input type="number" id="codeCfgIterBudget" /><span class="unit">项</span><button class="info-dot" data-help="限制 range/enumerate 规模；0 表示不限制。">!</button></div>
@@ -305,10 +307,11 @@
       <div class="runtime-item"><label>心跳失联判定</label><input type="number" id="codeCfgHeartbeatStall" /><span class="unit">ms</span><button class="info-dot" data-help="循环心跳失联判定阈值；0 表示不限制。">!</button></div>
       <div class="runtime-item runtime-item-wide"><label>说明</label><span class="unit">已移除“执行超时”独立项，运行中统一使用“心跳失联判定”。</span></div>
       <div class="runtime-item runtime-item-wide"><label>import 黑名单</label><input type="text" id="codeCfgImportBlocklist" placeholder="os,uos,sys,socket,network,_thread" /><span class="unit">逗号分隔</span><button class="info-dot" data-help="黑名单模块禁止 import，例如 os,socket,network,_thread。">!</button></div>
+      </div>
     </div>
     <div class="form-row">
       <button class="btn-secondary" id="codeLoadCfgBtn">加载配置</button>
-      <button class="btn-primary" id="codeSaveCfgBtn">保存配置</button>
+      <button class="btn-secondary" id="codeSaveCfgBtn">保存配置</button>
     </div>
     <div class="form-row">
       <button class="btn-secondary" id="codeResetCfgBtn">恢复默认配置</button>

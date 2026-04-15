@@ -2,6 +2,93 @@
 var codeHistoryItems = [];
 var selectedCodeHistoryVersion = '';
 var selectedCodeHistoryCode = '';
+var codeRunTransitioning = false;
+
+function sleepMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function setCodeRunButtonsState(running, switching = false) {
+  const isRunning = !!running;
+  const isSwitching = !!switching;
+
+  if (el.codeRunBtn) {
+    // 运行中: 运行按钮填充；非运行: 运行按钮描边。
+    el.codeRunBtn.classList.toggle('code-btn-filled', isRunning && !isSwitching);
+    el.codeRunBtn.classList.toggle('code-btn-outline', !isRunning || isSwitching);
+    // 运行中允许再次点击覆盖运行；仅在切换中禁用防抖。
+    el.codeRunBtn.disabled = isSwitching;
+  }
+
+  if (el.codeStopBtn) {
+    // 空闲时停止按钮填充，运行时停止按钮描边。
+    el.codeStopBtn.classList.toggle('code-btn-filled', !isRunning && !isSwitching);
+    el.codeStopBtn.classList.toggle('code-btn-outline', isRunning || isSwitching);
+    el.codeStopBtn.disabled = isSwitching;
+  }
+
+  if (el.codePersistBtn) {
+    el.codePersistBtn.disabled = isSwitching || isRunning;
+  }
+}
+
+function setCodeLimitsFormEnabled(enabled) {
+  const on = !!enabled;
+  if (el.codeCfgLimitsEnabled) el.codeCfgLimitsEnabled.checked = on;
+  const group = el.codeCfgLimitsGroup;
+  if (group) {
+    group.classList.toggle('disabled', !on);
+    const fields = group.querySelectorAll('input, textarea, select, button');
+    fields.forEach(node => {
+      node.disabled = !on;
+    });
+  }
+}
+
+async function setBootAutorunEnabled(enabled, silent = false) {
+  try {
+    const current = await apiGet('/code/config');
+    const payload = {
+      ...current,
+      bootAutorunEnabled: !!enabled,
+    };
+    const res = await apiPost('/code/config', payload);
+    if (el.codeBootAutorunEnabled) {
+      el.codeBootAutorunEnabled.checked = !!res?.config?.bootAutorunEnabled;
+    }
+    if (!silent) showToast(payload.bootAutorunEnabled ? '已开启开机运行' : '已关闭开机运行');
+  } catch (e) {
+    if (el.codeBootAutorunEnabled) {
+      el.codeBootAutorunEnabled.checked = !enabled;
+    }
+    if (!silent) showToast('保存开机运行开关失败: ' + e.message);
+  }
+}
+
+function bindCodeConfigSwitches() {
+  if (el.codeBootAutorunEnabled && !el.codeBootAutorunEnabled.__bindDone) {
+    el.codeBootAutorunEnabled.addEventListener('change', () => {
+      setBootAutorunEnabled(!!el.codeBootAutorunEnabled.checked, false);
+    });
+    el.codeBootAutorunEnabled.__bindDone = true;
+  }
+  if (el.codeCfgLimitsEnabled && !el.codeCfgLimitsEnabled.__bindDone) {
+    el.codeCfgLimitsEnabled.addEventListener('change', () => {
+      setCodeLimitsFormEnabled(!!el.codeCfgLimitsEnabled.checked);
+    });
+    el.codeCfgLimitsEnabled.__bindDone = true;
+  }
+}
+
+async function waitUntilCodeStopped(timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = await apiGet('/code/status');
+    if (!status?.running) return status;
+    await sleepMs(250);
+  }
+  throw new Error('stop timeout');
+}
 
 function formatHistoryTime(ts) {
   const n = Number(ts || 0);
@@ -525,6 +612,11 @@ async function saveCodeDraft() {
 }
 
 function setCodeConfigForm(cfg = {}) {
+  const limitsEnabled = cfg?.limitsEnabled !== false;
+  const bootAutorunEnabled = !!cfg?.bootAutorunEnabled;
+  if (el.codeBootAutorunEnabled) el.codeBootAutorunEnabled.checked = bootAutorunEnabled;
+  setCodeLimitsFormEnabled(limitsEnabled);
+
   if (el.codeCfgTextLimit) el.codeCfgTextLimit.value = cfg.codeTextLimit ?? '';
   if (el.codeCfgCallBudget) el.codeCfgCallBudget.value = cfg.callBudget ?? '';
   if (el.codeCfgIterBudget) el.codeCfgIterBudget.value = cfg.iterBudget ?? '';
@@ -547,7 +639,29 @@ function readCodeConfigForm() {
     if (Number.isNaN(n)) return fallback;
     return n < 0 ? fallback : n;
   };
+  const limitsEnabled = !!(el.codeCfgLimitsEnabled?.checked);
+  const bootAutorunEnabled = !!(el.codeBootAutorunEnabled?.checked);
+
+  if (!limitsEnabled) {
+    return {
+      limitsEnabled: false,
+      bootAutorunEnabled,
+      codeTextLimit: 0,
+      callBudget: 0,
+      iterBudget: 0,
+      outputMaxChars: 0,
+      outputMaxLines: 0,
+      httpHeaderMaxBytes: 0,
+      httpBodyMaxBytes: 0,
+      heartbeatIntervalMs: 0,
+      heartbeatStallMs: 0,
+      importBlocklist: [],
+    };
+  }
+
   return {
+    limitsEnabled: true,
+    bootAutorunEnabled,
     codeTextLimit: parseLimit(el.codeCfgTextLimit?.value, 12000),
     callBudget: parseLimit(el.codeCfgCallBudget?.value, 6000),
     iterBudget: parseLimit(el.codeCfgIterBudget?.value, 2000),
@@ -563,6 +677,7 @@ function readCodeConfigForm() {
 
 async function loadCodeConfig() {
   try {
+    bindCodeConfigSwitches();
     const cfg = await apiGet('/code/config');
     setCodeConfigForm(cfg || {});
     showToast('已加载运行配置');
@@ -607,30 +722,51 @@ async function resetCodeConfigDefaults() {
 }
 
 async function stopCodeRun() {
+  if (codeRunTransitioning) return;
   try {
+    codeRunTransitioning = true;
+    setCodeRunButtonsState(true, true);
     const res = await apiPost('/code/stop', {});
     showToast(res?.running ? '已请求停止运行' : '当前没有运行中的任务');
-    refreshCodeStatus(true);
+    await refreshCodeStatus(true);
   } catch (e) {
     showToast('停止运行失败: ' + e.message);
+  } finally {
+    codeRunTransitioning = false;
+    refreshCodeStatus(true);
   }
 }
 
 async function runCode() {
+  if (codeRunTransitioning) return;
   try {
+    codeRunTransitioning = true;
+    setCodeRunButtonsState(true, true);
+
     const source = el.codeRunSource?.value || 'draft';
     const payload = { source };
     if (source !== 'draft' && source !== 'active') {
       payload.code = el.codeEditor?.value || '';
     }
+
+    const current = await apiGet('/code/status');
+    if (current?.running) {
+      showToast('检测到已有任务，正在停止并覆盖运行...');
+      await apiPost('/code/stop', {});
+      await waitUntilCodeStopped(8000);
+    }
+
     const res = await apiPost('/code/run', payload);
     if (res?.ok) {
       showToast('代码开始运行: ' + (res.jobId || '')); 
-      refreshCodeStatus(true);
+      await refreshCodeStatus(true);
       startCodeStatusPolling();
     }
   } catch (e) {
     showToast('运行失败: ' + e.message);
+  } finally {
+    codeRunTransitioning = false;
+    refreshCodeStatus(true);
   }
 }
 
@@ -690,9 +826,10 @@ async function refreshCodeStatus(silent = false) {
     }
     if (el.codeRuntimeOutput) el.codeRuntimeOutput.textContent = out;
 
-    if (el.codeRunBtn) el.codeRunBtn.disabled = !!data?.running;
-    if (el.codePersistBtn) el.codePersistBtn.disabled = !!data?.running;
-    if (el.codeStopBtn) el.codeStopBtn.disabled = !data?.running;
+    setCodeRunButtonsState(!!data?.running, codeRunTransitioning);
+    if (el.codeBootAutorunEnabled && data?.config && Object.prototype.hasOwnProperty.call(data.config, 'bootAutorunEnabled')) {
+      el.codeBootAutorunEnabled.checked = !!data.config.bootAutorunEnabled;
+    }
 
     const log = await apiGet('/code/log');
     if (el.codeRuntimeLog) el.codeRuntimeLog.textContent = log?.log || '—';
@@ -702,10 +839,6 @@ async function refreshCodeStatus(silent = false) {
       if (!silent && status && status !== 'idle') {
         showToast('运行状态: ' + (statusMap[status] || status));
       }
-    }
-    if (status === 'running') {
-      if (el.codeRunBtn) el.codeRunBtn.disabled = true;
-      if (el.codePersistBtn) el.codePersistBtn.disabled = true;
     }
   } catch (e) {
     if (!silent) showToast('状态刷新失败: ' + e.message);
