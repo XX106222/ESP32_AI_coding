@@ -240,7 +240,7 @@ async function sendMessage() {
   attachedFiles = [];
   renderAttachmentPreview();
 
-  await generateResponse(conv);
+  await generateResponse(conv, text);
 }
 
 // ─── 停止生成 ─────────────────────────────────────────────
@@ -249,7 +249,104 @@ function stopGeneration() {
 }
 
 // ─── 生成 AI 回复 ─────────────────────────────────────────
-async function generateResponse(conv) {
+function getChatMode() {
+  const mode = String(config?.chatMode || 'normal').trim().toLowerCase();
+  if (mode === 'coding' || mode === 'react') return mode;
+  return 'normal';
+}
+
+function resolveRuntimeMode(userText) {
+  const t = String(userText || '').trim();
+  if (t.startsWith('/code')) return 'coding';
+  return getChatMode();
+}
+
+function normalizeAgentPrompt(userText) {
+  const t = String(userText || '').trim();
+  if (t.startsWith('/code')) {
+    return t.replace(/^\/code\s*/i, '').trim();
+  }
+  return t;
+}
+
+async function requestAgentChat(prompt, mode = 'coding') {
+  const safeMode = ['normal', 'coding', 'react'].includes(String(mode || '')) ? String(mode) : 'coding';
+  const autoRun = safeMode === 'coding';
+  const res = await fetch('/api/agent/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt,
+      mode: safeMode,
+      autoRun,
+      forceRun: true,
+      persistActive: false,
+    }),
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (e) {
+    // ignore json parse failure
+  }
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.error || `HTTP ${res.status}`);
+  }
+  return data;
+}
+
+async function agentCodeResponse(userText, assistantMsg, msgEl, startTime, conv, mode = 'coding') {
+  const prompt = normalizeAgentPrompt(userText);
+  if (!prompt) {
+    throw new Error('请输入 /code 后面的编程需求');
+  }
+
+  const ret = await requestAgentChat(prompt, mode);
+  const run = ret.run || {};
+  const lines = [];
+  lines.push(`AI ${ret.mode || getChatMode()} 模式任务已执行`);
+  if (ret.notes) lines.push(`说明: ${ret.notes}`);
+  if (run.started) lines.push(`运行已启动, jobId=${run.jobId || ''}`);
+  else if (run.error) lines.push(`运行未启动: ${run.error}`);
+
+  if (ret.code) {
+    lines.push('生成代码如下:');
+    lines.push('```python\n' + ret.code + '\n```');
+    if (el.codeEditor) el.codeEditor.value = ret.code;
+  } else {
+    lines.push('本次未生成代码');
+  }
+
+  assistantMsg.content = lines.join('\n\n');
+  assistantMsg.thinking = String(ret.thinking || '');
+
+  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+  const inTokens = Math.ceil(String(userText || '').length * 0.6);
+  const outTokens = Math.ceil(assistantMsg.content.length * 0.5);
+  const msgStats = {
+    inputTokens: inTokens,
+    outputTokens: outTokens,
+    totalTokens: inTokens + outTokens,
+    speed: Number(duration) > 0 ? (outTokens / Number(duration)).toFixed(1) : '0.0',
+    duration,
+  };
+  assistantMsg.stats = msgStats;
+  finishMessage(msgEl, assistantMsg, null, null, msgStats);
+
+  if (typeof refreshCodeStatus === 'function') {
+    refreshCodeStatus(true);
+  }
+  if (typeof startCodeStatusPolling === 'function') {
+    startCodeStatusPolling();
+  }
+  if (typeof loadCodeHistoryList === 'function') {
+    loadCodeHistoryList(true);
+  }
+
+  return msgStats;
+}
+
+async function generateResponse(conv, userText = '') {
   isGenerating = true;
   abortController = new AbortController();
   setSendBtnState('stop');
@@ -272,7 +369,10 @@ async function generateResponse(conv) {
   let finalStats = null;
 
   try {
-    if (config.stream) {
+    const mode = resolveRuntimeMode(userText);
+    if (mode === 'coding' || mode === 'react') {
+      finalStats = await agentCodeResponse(userText, assistantMsg, msgEl, startTime, conv, mode);
+    } else if (config.stream) {
       finalStats = await streamResponse(apiMessages, assistantMsg, msgEl, startTime, conv);
     } else {
       finalStats = await normalResponse(apiMessages, assistantMsg, msgEl, startTime, conv);
@@ -810,14 +910,50 @@ function addCodeCopyBtns(container) {
     if (pre.querySelector('.code-block-header')) return;
     const code = pre.querySelector('code');
     const lang = (code?.className || '').replace('language-', '') || 'code';
+    const normalized = String(lang).toLowerCase();
+    const runnable = normalized === 'python' || normalized === 'py' || normalized === 'micropython';
     const header = document.createElement('div');
     header.className = 'code-block-header';
+    const runBtn = runnable
+      ? '<button class="copy-code-btn run-code-btn" onclick="runCodeSnippetFromBlock(this)">运行</button>'
+      : '';
     header.innerHTML = `
       <span>${lang}</span>
-      <button class="copy-code-btn" onclick="copyCode(this)">复制代码</button>
+      <div class="code-block-actions">
+        ${runBtn}
+        <button class="copy-code-btn" onclick="copyCode(this)">复制代码</button>
+      </div>
     `;
     pre.insertBefore(header, pre.firstChild);
   });
+}
+
+async function runCodeSnippetFromBlock(btn) {
+  try {
+    const code = btn.closest('pre')?.querySelector('code')?.innerText || '';
+    const text = String(code || '').trim();
+    if (!text) {
+      showToast('代码块为空，无法运行');
+      return;
+    }
+    if (typeof runCodeSnippet !== 'function') {
+      showToast('运行功能未就绪');
+      return;
+    }
+    const oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '运行中...';
+    await runCodeSnippet(text, 'chat_block');
+    btn.textContent = '已运行';
+    setTimeout(() => {
+      btn.textContent = oldText;
+      btn.disabled = false;
+    }, 1000);
+  } catch (e) {
+    showToast('运行代码块失败: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '运行';
+  }
 }
 
 // ─── 思考过程折叠 ─────────────────────────────────────────

@@ -532,6 +532,7 @@ window.setServoAngle = setServoAngle;
 window.updateServoAngleLabel = updateServoAngleLabel;
 window.setServoSpeed = setServoSpeed;
 window.updateServoSpeedLabel = updateServoSpeedLabel;
+window.runCodeSnippet = runCodeSnippet;
 
 async function loadCodeDraft() {
   if (!el.codeEditor) return;
@@ -575,6 +576,7 @@ async function setBootAutorunEnabled(enabled, silent = false) {
     if (el.codeBootAutorunEnabled) {
       el.codeBootAutorunEnabled.checked = !!res?.config?.bootAutorunEnabled;
     }
+    await refreshCodeStatus(true);
     if (!silent) showToast(payload.bootAutorunEnabled ? '已开启开机运行' : '已关闭开机运行');
   } catch (e) {
     if (el.codeBootAutorunEnabled) el.codeBootAutorunEnabled.checked = !enabled;
@@ -622,6 +624,7 @@ async function setLimitsEnabled(enabled, silent = false) {
 
     const res = await apiPost('/code/config', payload);
     setCodeConfigForm(res?.config || payload);
+    await refreshCodeStatus(true);
     if (!silent) showToast(on ? '已开启运行限制并保存' : '已关闭运行限制并保存');
   } catch (e) {
     if (el.codeCfgLimitsEnabled) el.codeCfgLimitsEnabled.checked = !enabled;
@@ -656,6 +659,33 @@ async function saveCodeDraft() {
   } catch (e) {
     showToast('保存草稿失败: ' + e.message);
   }
+}
+
+async function runCodeSnippet(codeText, source = 'chat_block') {
+  const text = String(codeText || '').trim();
+  if (!text) {
+    throw new Error('empty code');
+  }
+
+  const current = await apiGet('/code/status');
+  if (current?.running) {
+    await apiPost('/code/stop', {});
+    await waitUntilCodeStopped(8000);
+  }
+
+  await apiPost('/code/draft', { code: text + '\n' });
+  if (el.codeEditor) {
+    el.codeEditor.value = text + '\n';
+  }
+
+  const ret = await apiPost('/code/run', { source, code: text + '\n' });
+  if (!ret?.ok) {
+    throw new Error(ret?.error || 'run failed');
+  }
+
+  await refreshCodeStatus(true);
+  startCodeStatusPolling();
+  return ret;
 }
 
 function setCodeConfigForm(cfg = {}) {

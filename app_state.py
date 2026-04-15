@@ -38,6 +38,11 @@ CODE_RUNTIME_CONFIG_FILE = CODE_DIR + "/runtime_config.json"
 CODE_HISTORY_DIR = CODE_DIR + "/history"
 CODE_HISTORY_INDEX_FILE = CODE_DIR + "/history_index.json"
 CODE_RUN_LOG_FILE = CODE_DIR + "/run.log"
+AGENT_DIR = DATA_DIR + "/agent"
+AGENT_MEMORY_FILE = AGENT_DIR + "/memory.json"
+AGENT_LOG_FILE = AGENT_DIR + "/log.json"
+AGENT_SETTINGS_FILE = AGENT_DIR + "/settings.json"
+AGENT_MAX_HISTORY_ROUNDS = 12
 
 # GPIO 安全配置：保留系统关键引脚
 RESERVED_GPIO = {
@@ -135,6 +140,39 @@ DEFAULT_CODE_RUNTIME_CONFIG = {
     "heartbeatStallMs": CODE_LOOP_STALL_MS,
 }
 
+DEFAULT_AGENT_SETTINGS = {
+    "enabled": True,
+    "autoRun": True,
+    "autoSaveDraft": True,
+    "modePrompts": {
+        "normal": (
+            "你是通用中文助手，可问答、解释与给出示例代码。"
+            "不强制只输出代码或 JSON。"
+        ),
+        "coding": (
+            "你是 ESP32 MicroPython 编程代理。必须只输出严格 JSON，禁止 markdown 代码块。"
+            "输出格式固定为"
+            "{\"code\":\"...\",\"memory\":{\"set\":{},\"delete\":[]},\"notes\":\"...\"}。"
+            "生成代码只能使用 MicroPython 可用 API，避免危险系统调用。"
+            "代码末尾必须使用英文 print() 输出执行结果。"
+            "如果用户要求修改现有代码，优先在现有代码基础上增量修改，而非完全重写。"
+        ),
+        "react": (
+            "你是 React 编程助手，优先输出组件化、可维护代码。"
+            "当前模式为预留开发模式，不要生成硬件控制指令。"
+            "可输出 JSON：{\"code\":\"...\",\"notes\":\"...\"}。"
+        ),
+    },
+    "systemPrompt": (
+        "你是 ESP32 MicroPython 编程代理。必须只输出严格 JSON，禁止 markdown 代码块。"
+        "输出格式固定为"
+        "{\"code\":\"...\",\"memory\":{\"set\":{},\"delete\":[]},\"notes\":\"...\"}。"
+        "生成代码只能使用 MicroPython 可用 API，避免危险系统调用。"
+        "代码末尾必须使用英文 print() 输出执行结果。"
+        "如果用户要求修改现有代码，优先在现有代码基础上增量修改，而非完全重写。"
+    ),
+}
+
 CODE_LOCK = None
 if _thread is not None:
     try:
@@ -151,6 +189,7 @@ DEFAULT_CONFIG = {
     "temperature": 0.7,
     "maxTokens": 4096,
     "stream": True,
+    "chatMode": "normal",
 }
 
 MIME_TYPES = {

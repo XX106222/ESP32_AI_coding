@@ -336,6 +336,21 @@
 }
 .copy-code-btn:hover { background: var(--bg4); color: var(--text2); }
 
+.code-block-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.run-code-btn {
+  border-color: rgba(34, 197, 94, 0.35);
+  color: var(--green);
+}
+
+.run-code-btn:hover {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--green);
+}
+
 .message-content pre code {
   display: block;
   padding: 12px;

@@ -21,6 +21,7 @@ let config = {
   temperature: 0.7,
   maxTokens: 4096,
   stream: true,
+  chatMode: 'normal',
 };
 
 let currentTab = 'chat';       // 当前激活的侧边栏 tab
@@ -38,6 +39,8 @@ let persistQueue = Promise.resolve();
 let deviceStatus = { connected: false, ip: null };
 let codeStatusTimer = null;
 let sidebarExpandedWidth = 380;
+let agentSettingsCache = null;
+let agentMemoryBaseline = {};
 
 // ─── DOM 引用 ─────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -45,8 +48,10 @@ const el = {
   sidebar: $('sidebar'),
   sidebarToggle: $('sidebarToggle'),
   menuBtn: $('menuBtn'),
+  chatModeSelect: $('chatModeSelect'),
   navBtns: document.querySelectorAll('.nav-btn'),
   panelSettings: $('panel-settings'),
+  panelAgent: $('panel-agent'),
   panelHistory: $('panel-history'),
   panelDevice: $('panel-device'),
   panelCode: $('panel-code'),
@@ -66,6 +71,12 @@ const el = {
   streamMode: $('streamMode'),
   saveConfig: $('saveConfig'),
   configStatus: $('configStatus'),
+  agentCodingPrompt: $('agentCodingPrompt'),
+  saveAgentPromptBtn: $('saveAgentPromptBtn'),
+  agentPromptStatus: $('agentPromptStatus'),
+  agentMemoryEditor: $('agentMemoryEditor'),
+  saveAgentMemoryBtn: $('saveAgentMemoryBtn'),
+  agentMemoryStatus: $('agentMemoryStatus'),
   currentModelBadge: $('currentModelBadge'),
   themeToggle: $('themeToggle'),
   clearChat: $('clearChat'),
@@ -236,6 +247,9 @@ function switchTab(tab) {
 
   // 显示/隐藏面板 — 用 display 直接控制，不依赖 hidden 类
   el.panelSettings.style.display = (tab === 'settings') ? 'flex' : 'none';
+  if (el.panelAgent) {
+    el.panelAgent.style.display = (tab === 'agent') ? 'flex' : 'none';
+  }
   el.panelHistory.style.display  = (tab === 'history')  ? 'flex' : 'none';
   el.panelDevice.style.display   = (tab === 'device')   ? 'flex' : 'none';
   if (el.panelCode) {
@@ -245,6 +259,10 @@ function switchTab(tab) {
   // 切换到 Ollama 时自动拉取模型
   if (tab === 'settings' && el.providerSelect.value === 'ollama') {
     fetchOllamaModels();
+  }
+
+  if (tab === 'agent') {
+    loadAgentPanel();
   }
 
   // 切换到设备管理时刷新状态
@@ -276,6 +294,12 @@ function bindEvents() {
 
   // API 配置
   el.providerSelect.addEventListener('change', onProviderChange);
+  if (el.chatModeSelect) {
+    el.chatModeSelect.addEventListener('change', () => {
+      config.chatMode = el.chatModeSelect.value || 'normal';
+      localStorage.setItem('ai_chat_config', JSON.stringify(config));
+    });
+  }
   el.temperature.addEventListener('input', () => {
     el.tempVal.textContent = el.temperature.value;
   });
@@ -285,6 +309,8 @@ function bindEvents() {
   });
    el.saveConfig.addEventListener('click', saveConfig);
    el.fetchModels.addEventListener('click', onFetchModelsClick);
+   if (el.saveAgentPromptBtn) el.saveAgentPromptBtn.addEventListener('click', saveAgentPrompt);
+   if (el.saveAgentMemoryBtn) el.saveAgentMemoryBtn.addEventListener('click', saveAgentMemory);
    if (el.refreshDeviceStatus) {
      el.refreshDeviceStatus.addEventListener('click', () => fetchDeviceStatus(false));
    }
@@ -613,6 +639,11 @@ async function fetchModelList() {
 
 // ─── 配置管理 ─────────────────────────────────────────────
 function fillForm() {
+  config.chatMode = (config.chatMode || 'normal');
+  if (!['normal', 'coding', 'react'].includes(config.chatMode)) {
+    config.chatMode = 'normal';
+  }
+  if (el.chatModeSelect) el.chatModeSelect.value = config.chatMode;
   el.providerSelect.value = config.provider;
   el.baseUrl.value = config.baseUrl;
   el.apiKey.value = config.apiKey;
@@ -660,6 +691,7 @@ async function saveConfig() {
     temperature: parseFloat(el.temperature.value),
     maxTokens: parseInt(el.maxTokens.value) || 4096,
     stream: el.streamMode.checked,
+    chatMode: el.chatModeSelect ? (el.chatModeSelect.value || 'normal') : (config.chatMode || 'normal'),
   };
 
   localStorage.setItem('ai_chat_config', JSON.stringify(config));
@@ -699,6 +731,107 @@ async function loadConfig() {
 function showConfigStatus(msg, type) {
   el.configStatus.textContent = msg;
   el.configStatus.className = 'config-status ' + type;
+}
+
+function showInlineStatus(node, msg, type) {
+  if (!node) return;
+  node.textContent = msg;
+  node.className = 'config-status ' + (type || '');
+}
+
+function safeJsonClone(obj) {
+  try {
+    return JSON.parse(JSON.stringify(obj || {}));
+  } catch (e) {
+    return {};
+  }
+}
+
+async function loadAgentPanel() {
+  await loadAgentSettings();
+  await loadAgentMemory();
+}
+
+async function loadAgentSettings() {
+  try {
+    const settings = await apiGet('/agent/settings');
+    if (!settings || typeof settings !== 'object') throw new Error('invalid settings');
+    agentSettingsCache = settings;
+    const modePrompts = (settings.modePrompts && typeof settings.modePrompts === 'object') ? settings.modePrompts : {};
+    const codingPrompt = String(modePrompts.coding || settings.systemPrompt || '');
+    if (el.agentCodingPrompt) el.agentCodingPrompt.value = codingPrompt;
+    showInlineStatus(el.agentPromptStatus, '已加载', 'ok');
+  } catch (e) {
+    showInlineStatus(el.agentPromptStatus, '加载失败: ' + e.message, 'err');
+  }
+}
+
+async function saveAgentPrompt() {
+  try {
+    const prompt = String(el.agentCodingPrompt?.value || '');
+    if (!prompt.trim()) {
+      showInlineStatus(el.agentPromptStatus, '提示词不能为空', 'err');
+      return;
+    }
+
+    let base = agentSettingsCache;
+    if (!base || typeof base !== 'object') {
+      base = await apiGet('/agent/settings');
+    }
+    const payload = { ...(base || {}) };
+    const modePrompts = (payload.modePrompts && typeof payload.modePrompts === 'object') ? { ...payload.modePrompts } : {};
+    modePrompts.coding = prompt;
+    payload.modePrompts = modePrompts;
+
+    const ret = await apiPost('/agent/settings', payload);
+    agentSettingsCache = (ret && ret.settings && typeof ret.settings === 'object') ? ret.settings : payload;
+    showInlineStatus(el.agentPromptStatus, '✓ 提示词已保存', 'ok');
+    showToast('编程模式提示词已保存');
+  } catch (e) {
+    showInlineStatus(el.agentPromptStatus, '保存失败: ' + e.message, 'err');
+  }
+}
+
+async function loadAgentMemory() {
+  try {
+    const memory = await apiGet('/agent/memory');
+    const mem = (memory && typeof memory === 'object' && !Array.isArray(memory)) ? memory : {};
+    agentMemoryBaseline = safeJsonClone(mem);
+    if (el.agentMemoryEditor) el.agentMemoryEditor.value = JSON.stringify(mem, null, 2);
+    showInlineStatus(el.agentMemoryStatus, '已加载', 'ok');
+  } catch (e) {
+    showInlineStatus(el.agentMemoryStatus, '加载失败: ' + e.message, 'err');
+  }
+}
+
+async function saveAgentMemory() {
+  try {
+    const raw = String(el.agentMemoryEditor?.value || '').trim();
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      showInlineStatus(el.agentMemoryStatus, '记忆必须是 JSON 对象', 'err');
+      return;
+    }
+
+    const removed = [];
+    Object.keys(agentMemoryBaseline || {}).forEach(k => {
+      if (!Object.prototype.hasOwnProperty.call(parsed, k)) {
+        removed.push(k);
+      }
+    });
+
+    await apiPost('/agent/memory', {
+      set: parsed,
+      delete: removed,
+    });
+
+    agentMemoryBaseline = safeJsonClone(parsed);
+    if (el.agentMemoryEditor) el.agentMemoryEditor.value = JSON.stringify(parsed, null, 2);
+    showInlineStatus(el.agentMemoryStatus, '✓ 记忆已保存', 'ok');
+    showToast('记忆已保存');
+  } catch (e) {
+    showInlineStatus(el.agentMemoryStatus, '保存失败: ' + e.message, 'err');
+  }
 }
 
 function updateModelBadge() {

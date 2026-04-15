@@ -15,6 +15,9 @@
     <button class="nav-btn" data-tab="settings" title="API 配置">
       <span class="nav-icon">⚙️</span><span class="nav-label">API 配置</span>
     </button>
+    <button class="nav-btn" data-tab="agent" title="编程模式配置">
+      <span class="nav-icon">🤖</span><span class="nav-label">编程模式配置</span>
+    </button>
     <button class="nav-btn" data-tab="history" title="历史记录">
       <span class="nav-icon">📋</span><span class="nav-label">历史记录</span>
     </button>
@@ -99,6 +102,24 @@
     <h3 class="panel-title">对话历史</h3>
     <button class="btn-secondary" id="newChat">＋ 新对话</button>
     <div id="historyList" class="history-list"></div>
+  </div>
+
+  <div class="panel" id="panel-agent" style="display:none">
+    <h3 class="panel-title">编程模式配置</h3>
+
+    <div class="form-group">
+      <label>编程模式系统提示词</label>
+      <textarea id="agentCodingPrompt" class="agent-editor" rows="10" placeholder="你是 ESP32 MicroPython 编程代理..."></textarea>
+      <button class="btn-primary" id="saveAgentPromptBtn">保存提示词</button>
+      <div id="agentPromptStatus" class="config-status"></div>
+    </div>
+
+    <div class="form-group">
+      <label>记忆（JSON 对象）</label>
+      <textarea id="agentMemoryEditor" class="agent-editor" rows="12" placeholder="{&#10;  &quot;GPIO10_device&quot;: &quot;servo&quot;&#10;}"></textarea>
+      <button class="btn-primary" id="saveAgentMemoryBtn">保存记忆</button>
+      <div id="agentMemoryStatus" class="config-status"></div>
+    </div>
   </div>
 
   <div class="panel" id="panel-device" style="display:none">
@@ -224,6 +245,11 @@
 <main class="main" id="main">
   <header class="topbar">
     <button class="icon-btn menu-btn" id="menuBtn" title="展开侧边栏">☰</button>
+    <select id="chatModeSelect" class="chat-mode-select" title="聊天模式">
+      <option value="normal">正常聊天</option>
+      <option value="coding">编程模式</option>
+      <option value="react">React编程(预留)</option>
+    </select>
     <div class="model-badge" id="currentModelBadge">未配置</div>
     <div class="topbar-actions">
       <button class="icon-btn theme-btn" id="themeToggle" title="切换主题">🌙</button>

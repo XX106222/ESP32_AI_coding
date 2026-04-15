@@ -482,6 +482,18 @@ input[type="range"]::-webkit-slider-thumb {
 .config-status.ok { color: var(--green); }
 .config-status.err { color: var(--red); }
 
+/* ===== 编程模式配置 ===== */
+.agent-editor {
+  min-height: 140px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+#panel-agent .form-group {
+  gap: 8px;
+}
+
 /* ===== 历史列表 ===== */
 .history-list {
   display: flex;
@@ -541,6 +553,22 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .menu-btn { display: none; }
+
+.chat-mode-select {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text2);
+  font-size: 0.82rem;
+  padding: 5px 10px;
+  min-width: 138px;
+}
+
+.chat-mode-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--text);
+}
 
 .model-badge {
   background: var(--bg3);
