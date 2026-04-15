@@ -173,6 +173,7 @@ const el = {
   codeCfgIterBudget: $('codeCfgIterBudget'),
   codeCfgOutputChars: $('codeCfgOutputChars'),
   codeCfgOutputLines: $('codeCfgOutputLines'),
+  codeCfgRunLogChars: $('codeCfgRunLogChars'),
   codeCfgHttpHeader: $('codeCfgHttpHeader'),
   codeCfgHttpBody: $('codeCfgHttpBody'),
   codeCfgHeartbeatInterval: $('codeCfgHeartbeatInterval'),
@@ -193,6 +194,8 @@ const el = {
   codeRuntimeNote: $('codeRuntimeNote'),
   codeRuntimeOutput: $('codeRuntimeOutput'),
   codeRuntimeLog: $('codeRuntimeLog'),
+  codeClearOutputBtn: $('codeClearOutputBtn'),
+  codeClearRuntimeLogBtn: $('codeClearRuntimeLogBtn'),
   chatContainer: $('chatContainer'),
   welcomeScreen: $('welcomeScreen'),
   messageList: $('messageList'),
@@ -416,6 +419,8 @@ function bindEvents() {
     if (el.codeLoadCfgBtn) el.codeLoadCfgBtn.addEventListener('click', loadCodeConfig);
     if (el.codeSaveCfgBtn) el.codeSaveCfgBtn.addEventListener('click', saveCodeConfig);
     if (el.codeResetCfgBtn) el.codeResetCfgBtn.addEventListener('click', resetCodeConfigDefaults);
+    if (el.codeClearOutputBtn) el.codeClearOutputBtn.addEventListener('click', clearCodeOutputWindow);
+    if (el.codeClearRuntimeLogBtn) el.codeClearRuntimeLogBtn.addEventListener('click', clearCodeRuntimeLogWindow);
     if (el.codeConfigToggleBtn) el.codeConfigToggleBtn.addEventListener('click', toggleCodeConfigPanel);
     if (el.codeConfigModalOverlay) el.codeConfigModalOverlay.addEventListener('click', () => closeCodeConfigModal());
     if (el.codeConfigModalClose) el.codeConfigModalClose.addEventListener('click', () => closeCodeConfigModal());
@@ -798,7 +803,7 @@ async function loadAgentSettings() {
     agentSettingsCache = settings;
     const modePrompts = (settings.modePrompts && typeof settings.modePrompts === 'object') ? settings.modePrompts : {};
     const codingPrompt = String(modePrompts.coding || getModePromptFromSettings('coding', settings) || '');
-    const normalPrompt = String(modePrompts.normal || config.systemPrompt || '');
+    const normalPrompt = String(config.systemPrompt || settings.systemPrompt || modePrompts.normal || '');
     if (el.agentCodingPrompt) el.agentCodingPrompt.value = codingPrompt;
     if (el.systemPrompt && normalPrompt !== String(el.systemPrompt.value || '')) {
       el.systemPrompt.value = normalPrompt;

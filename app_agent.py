@@ -55,6 +55,12 @@ def _save_agent_settings(settings):
             mode_prompts = {}
             mode_prompts.update(defaults)
             mode_prompts.update(got)
+            normal_prompt = settings.get("systemPrompt", "")
+            if not (isinstance(normal_prompt, str) and normal_prompt.strip()):
+                normal_prompt = mode_prompts.get("normal", defaults.get("normal", ""))
+            if isinstance(normal_prompt, str) and normal_prompt.strip():
+                mode_prompts["normal"] = normal_prompt
+                merged["systemPrompt"] = normal_prompt
             merged["modePrompts"] = mode_prompts
     atomic_write_json(st.AGENT_SETTINGS_FILE, merged)
     return merged
@@ -117,12 +123,29 @@ def _resolve_mode_prompt(settings, mode):
     m = str(mode or "coding").strip().lower()
     mode_prompts = settings.get("modePrompts", {})
     if isinstance(mode_prompts, dict):
+        if m == "normal":
+            cfg = read_json(st.CONFIG_FILE, st.DEFAULT_CONFIG)
+            if isinstance(cfg, dict):
+                p = str(cfg.get("systemPrompt", "") or "")
+                if p.strip():
+                    return p
+            p = settings.get("systemPrompt", "")
+            if isinstance(p, str) and p.strip():
+                return p
+            p = mode_prompts.get("normal")
+            if isinstance(p, str) and p.strip():
+                return p
+            return st.DEFAULT_AGENT_SETTINGS["modePrompts"]["normal"]
         p = mode_prompts.get(m)
         if isinstance(p, str) and p.strip():
             return p
     base = str(settings.get("systemPrompt", "") or "")
-    if base.strip():
+    if base.strip() and m == "coding":
         return base
+    if m == "coding":
+        return st.DEFAULT_AGENT_SETTINGS["modePrompts"]["coding"]
+    if m == "react":
+        return st.DEFAULT_AGENT_SETTINGS["modePrompts"]["react"]
     return st.DEFAULT_AGENT_SETTINGS["systemPrompt"]
 
 

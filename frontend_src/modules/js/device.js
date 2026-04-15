@@ -593,34 +593,7 @@ async function setLimitsEnabled(enabled, silent = false) {
     setCodeLimitsFormEnabled(on);
 
     const cfg = await apiGet('/code/config');
-    let payload = { ...cfg, limitsEnabled: on };
-
-    if (!on) {
-      // 关闭限制后立即落盘为无限制配置。
-      payload = {
-        ...payload,
-        codeTextLimit: 0,
-        callBudget: 0,
-        iterBudget: 0,
-        outputMaxChars: 0,
-        outputMaxLines: 0,
-        httpHeaderMaxBytes: 0,
-        httpBodyMaxBytes: 0,
-        heartbeatIntervalMs: 0,
-        heartbeatStallMs: 0,
-        importBlocklist: [],
-      };
-      if (el.codeCfgTextLimit) el.codeCfgTextLimit.value = '0';
-      if (el.codeCfgCallBudget) el.codeCfgCallBudget.value = '0';
-      if (el.codeCfgIterBudget) el.codeCfgIterBudget.value = '0';
-      if (el.codeCfgOutputChars) el.codeCfgOutputChars.value = '0';
-      if (el.codeCfgOutputLines) el.codeCfgOutputLines.value = '0';
-      if (el.codeCfgHttpHeader) el.codeCfgHttpHeader.value = '0';
-      if (el.codeCfgHttpBody) el.codeCfgHttpBody.value = '0';
-      if (el.codeCfgHeartbeatInterval) el.codeCfgHeartbeatInterval.value = '0';
-      if (el.codeCfgHeartbeatStall) el.codeCfgHeartbeatStall.value = '0';
-      if (el.codeCfgImportBlocklist) el.codeCfgImportBlocklist.value = '';
-    }
+    const payload = { ...cfg, limitsEnabled: on };
 
     const res = await apiPost('/code/config', payload);
     setCodeConfigForm(res?.config || payload);
@@ -698,6 +671,7 @@ function setCodeConfigForm(cfg = {}) {
   if (el.codeCfgIterBudget) el.codeCfgIterBudget.value = cfg.iterBudget ?? '';
   if (el.codeCfgOutputChars) el.codeCfgOutputChars.value = cfg.outputMaxChars ?? '';
   if (el.codeCfgOutputLines) el.codeCfgOutputLines.value = cfg.outputMaxLines ?? '';
+  if (el.codeCfgRunLogChars) el.codeCfgRunLogChars.value = cfg.runLogMaxChars ?? '';
   if (el.codeCfgHttpHeader) el.codeCfgHttpHeader.value = cfg.httpHeaderMaxBytes ?? '';
   if (el.codeCfgHttpBody) el.codeCfgHttpBody.value = cfg.httpBodyMaxBytes ?? '';
   if (el.codeCfgHeartbeatInterval) el.codeCfgHeartbeatInterval.value = cfg.heartbeatIntervalMs ?? '';
@@ -718,31 +692,15 @@ function readCodeConfigForm() {
   const limitsEnabled = !!(el.codeCfgLimitsEnabled?.checked);
   const bootAutorunEnabled = !!(el.codeBootAutorunEnabled?.checked);
 
-  if (!limitsEnabled) {
-    return {
-      limitsEnabled: false,
-      bootAutorunEnabled,
-      codeTextLimit: 0,
-      callBudget: 0,
-      iterBudget: 0,
-      outputMaxChars: 0,
-      outputMaxLines: 0,
-      httpHeaderMaxBytes: 0,
-      httpBodyMaxBytes: 0,
-      heartbeatIntervalMs: 0,
-      heartbeatStallMs: 0,
-      importBlocklist: [],
-    };
-  }
-
   return {
-    limitsEnabled: true,
+    limitsEnabled,
     bootAutorunEnabled,
     codeTextLimit: parseLimit(el.codeCfgTextLimit?.value, 12000),
     callBudget: parseLimit(el.codeCfgCallBudget?.value, 6000),
     iterBudget: parseLimit(el.codeCfgIterBudget?.value, 2000),
     outputMaxChars: parseLimit(el.codeCfgOutputChars?.value, 4000),
     outputMaxLines: parseLimit(el.codeCfgOutputLines?.value, 120),
+    runLogMaxChars: parseLimit(el.codeCfgRunLogChars?.value, 16000),
     httpHeaderMaxBytes: parseLimit(el.codeCfgHttpHeader?.value, 8192),
     httpBodyMaxBytes: parseLimit(el.codeCfgHttpBody?.value, 16384),
     heartbeatIntervalMs: parseLimit(el.codeCfgHeartbeatInterval?.value, 300),
@@ -783,6 +741,7 @@ async function resetCodeConfigDefaults() {
     iterBudget: 2000,
     outputMaxChars: 4000,
     outputMaxLines: 120,
+    runLogMaxChars: 16000,
     httpHeaderMaxBytes: 8192,
     httpBodyMaxBytes: 16384,
     heartbeatIntervalMs: 300,
@@ -792,6 +751,27 @@ async function resetCodeConfigDefaults() {
   setCodeConfigForm(defaults);
   showToast('已恢复默认配置到输入框，点击“保存配置”才会写入 Flash');
   refreshCodeStatus(true);
+}
+
+async function clearCodeOutputWindow() {
+  try {
+    await apiPost('/code/clear', { target: 'output' });
+    if (el.codeRuntimeOutput) el.codeRuntimeOutput.textContent = '—';
+    await refreshCodeStatus(true);
+    showToast('已清空输出/错误窗口');
+  } catch (e) {
+    showToast('清空输出失败: ' + e.message);
+  }
+}
+
+async function clearCodeRuntimeLogWindow() {
+  try {
+    await apiPost('/code/clear', { target: 'log' });
+    if (el.codeRuntimeLog) el.codeRuntimeLog.textContent = '—';
+    showToast('已清空运行日志窗口');
+  } catch (e) {
+    showToast('清空运行日志失败: ' + e.message);
+  }
 }
 
 async function stopCodeRun() {

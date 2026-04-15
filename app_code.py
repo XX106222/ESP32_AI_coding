@@ -105,6 +105,22 @@ def sanitize_runtime_config(data):
         safe_blocklist = list(base["importBlocklist"])
 
     heartbeat_stall_src = data.get("heartbeatStallMs", data.get("timeoutMs", base["heartbeatStallMs"]))
+    if not limits_enabled:
+        return {
+            "limitsEnabled": False,
+            "bootAutorunEnabled": boot_autorun_enabled,
+            "codeTextLimit": base["codeTextLimit"],
+            "callBudget": base["callBudget"],
+            "iterBudget": base["iterBudget"],
+            "outputMaxChars": base["outputMaxChars"],
+            "outputMaxLines": base["outputMaxLines"],
+            "runLogMaxChars": base.get("runLogMaxChars", 16000),
+            "httpHeaderMaxBytes": base["httpHeaderMaxBytes"],
+            "httpBodyMaxBytes": base["httpBodyMaxBytes"],
+            "importBlocklist": list(base["importBlocklist"]),
+            "heartbeatIntervalMs": base["heartbeatIntervalMs"],
+            "heartbeatStallMs": base["heartbeatStallMs"],
+        }
     return {
         "limitsEnabled": limits_enabled,
         "bootAutorunEnabled": boot_autorun_enabled,
@@ -113,6 +129,7 @@ def sanitize_runtime_config(data):
         "iterBudget": _to_int(data.get("iterBudget", base["iterBudget"]), base["iterBudget"], 0, 1000000),
         "outputMaxChars": _to_int(data.get("outputMaxChars", base["outputMaxChars"]), base["outputMaxChars"], 0, 800000),
         "outputMaxLines": _to_int(data.get("outputMaxLines", base["outputMaxLines"]), base["outputMaxLines"], 0, 200000),
+        "runLogMaxChars": _to_int(data.get("runLogMaxChars", base.get("runLogMaxChars", 16000)), base.get("runLogMaxChars", 16000), 0, 1200000),
         "httpHeaderMaxBytes": _to_int(data.get("httpHeaderMaxBytes", base["httpHeaderMaxBytes"]), base["httpHeaderMaxBytes"], 0, 262144),
         "httpBodyMaxBytes": _to_int(data.get("httpBodyMaxBytes", base["httpBodyMaxBytes"]), base["httpBodyMaxBytes"], 0, 2000000),
         "importBlocklist": safe_blocklist,
@@ -133,19 +150,21 @@ def apply_runtime_config(cfg):
         st.CODE_MAX_RANGE_ITEMS = cfg["iterBudget"]
         st.CODE_OUTPUT_MAX_CHARS = cfg["outputMaxChars"]
         st.CODE_OUTPUT_MAX_LINES = cfg["outputMaxLines"]
+        st.CODE_RUN_LOG_MAX_CHARS = cfg["runLogMaxChars"]
         st.MAX_HEADER_BYTES = cfg["httpHeaderMaxBytes"]
         st.MAX_BODY_BYTES = cfg["httpBodyMaxBytes"]
         st.CODE_IMPORT_BLOCKLIST = tuple(cfg["importBlocklist"])
         st.CODE_LOOP_HEARTBEAT_INTERVAL_MS = cfg["heartbeatIntervalMs"]
         st.CODE_LOOP_STALL_MS = cfg["heartbeatStallMs"]
     else:
-        # 关闭运行限制时，预算/上限全部设为 0，黑名单清空。
+        # 关闭运行限制时，仅让运行时生效为无限制；保存值仍保留在 Flash。
         st.CODE_MAX_TEXT = 0
         st.CODE_RUN_TIMEOUT_MS = 0
         st.CODE_MAX_CALLS = 0
         st.CODE_MAX_RANGE_ITEMS = 0
         st.CODE_OUTPUT_MAX_CHARS = 0
         st.CODE_OUTPUT_MAX_LINES = 0
+        st.CODE_RUN_LOG_MAX_CHARS = 0
         st.MAX_HEADER_BYTES = 0
         st.MAX_BODY_BYTES = 0
         st.CODE_IMPORT_BLOCKLIST = ()
@@ -167,20 +186,7 @@ def apply_runtime_config(cfg):
 
 
 def get_runtime_config():
-    return {
-        "limitsEnabled": bool(getattr(st, "CODE_LIMITS_ENABLED", True)),
-        "bootAutorunEnabled": bool(getattr(st, "CODE_BOOT_AUTORUN_ENABLED", False)),
-        "codeTextLimit": st.CODE_MAX_TEXT,
-        "callBudget": st.CODE_MAX_CALLS,
-        "iterBudget": st.CODE_MAX_RANGE_ITEMS,
-        "outputMaxChars": st.CODE_OUTPUT_MAX_CHARS,
-        "outputMaxLines": st.CODE_OUTPUT_MAX_LINES,
-        "httpHeaderMaxBytes": st.MAX_HEADER_BYTES,
-        "httpBodyMaxBytes": st.MAX_BODY_BYTES,
-        "importBlocklist": list(getattr(st, "CODE_IMPORT_BLOCKLIST", [])),
-        "heartbeatIntervalMs": st.CODE_LOOP_HEARTBEAT_INTERVAL_MS,
-        "heartbeatStallMs": st.CODE_LOOP_STALL_MS,
-    }
+    return sanitize_runtime_config(read_json(st.CODE_RUNTIME_CONFIG_FILE, st.DEFAULT_CODE_RUNTIME_CONFIG))
 
 
 def load_runtime_config():
@@ -623,6 +629,36 @@ def handle_code_api(client, method, api_path, query_string, body):
         runtime_set_many({"stopRequested": True})
         append_run_log("stop requested")
         send_json(client, 200, "OK", {"ok": True, "running": True, "stopRequested": True})
+        return True
+
+    if api_path == "/api/code/clear" and method == "POST":
+        data = parse_json_body(body)
+        if not isinstance(data, dict):
+            data = {}
+        target = str(data.get("target", "")).strip().lower()
+        if target not in ("", "all", "output", "log"):
+            send_json(client, 400, "Bad Request", {"error": "invalid target"})
+            return True
+
+        clear_output = target in ("", "all", "output")
+        clear_log = target in ("", "all", "log")
+
+        if clear_output:
+            runtime_set_many({
+                "output": "",
+                "error": "",
+                "outputTruncated": False,
+            })
+        if clear_log:
+            atomic_write_text(st.CODE_RUN_LOG_FILE, "")
+
+        send_json(client, 200, "OK", {
+            "ok": True,
+            "cleared": {
+                "output": clear_output,
+                "log": clear_log,
+            }
+        })
         return True
 
     if api_path == "/api/code/draft":

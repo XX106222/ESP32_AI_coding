@@ -123,8 +123,9 @@ def append_run_log(text):
     now = int(time.time())
     old = read_text(st.CODE_RUN_LOG_FILE, "")
     joined = old + "\n[%d] %s" % (now, text)
-    if len(joined) > 16000:
-        joined = joined[-16000:]
+    max_chars = int(getattr(st, "CODE_RUN_LOG_MAX_CHARS", 16000) or 0)
+    if max_chars > 0 and len(joined) > max_chars:
+        joined = joined[-max_chars:]
     atomic_write_text(st.CODE_RUN_LOG_FILE, joined)
 
 

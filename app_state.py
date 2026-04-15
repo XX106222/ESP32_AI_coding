@@ -72,6 +72,7 @@ CODE_HISTORY_LIMIT = 20
 CODE_RUN_TIMEOUT_MS = 12000
 CODE_OUTPUT_MAX_CHARS = 4000
 CODE_OUTPUT_MAX_LINES = 120
+CODE_RUN_LOG_MAX_CHARS = 16000
 CODE_MAX_CALLS = 6000
 CODE_MAX_RANGE_ITEMS = 2000
 CODE_IMPORT_BLOCKLIST = (
@@ -133,6 +134,7 @@ DEFAULT_CODE_RUNTIME_CONFIG = {
     "iterBudget": CODE_MAX_RANGE_ITEMS,
     "outputMaxChars": CODE_OUTPUT_MAX_CHARS,
     "outputMaxLines": CODE_OUTPUT_MAX_LINES,
+    "runLogMaxChars": CODE_RUN_LOG_MAX_CHARS,
     "httpHeaderMaxBytes": MAX_HEADER_BYTES,
     "httpBodyMaxBytes": MAX_BODY_BYTES,
     "importBlocklist": list(CODE_IMPORT_BLOCKLIST),
@@ -164,12 +166,8 @@ DEFAULT_AGENT_SETTINGS = {
         ),
     },
     "systemPrompt": (
-        "你是 ESP32 MicroPython 编程代理。必须只输出严格 JSON，禁止 markdown 代码块。"
-        "输出格式固定为"
-        "{\"code\":\"...\",\"memory\":{\"set\":{},\"delete\":[]},\"notes\":\"...\"}。"
-        "生成代码只能使用 MicroPython 可用 API，避免危险系统调用。"
-        "代码末尾必须使用英文 print() 输出执行结果。"
-        "如果用户要求修改现有代码，优先在现有代码基础上增量修改，而非完全重写。"
+        "你是通用中文助手，可问答、解释与给出示例代码。"
+        "不强制只输出代码或 JSON。"
     ),
 }
 

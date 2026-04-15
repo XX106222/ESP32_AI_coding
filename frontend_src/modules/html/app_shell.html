@@ -234,8 +234,8 @@
       <div><b>备注:</b> <span id="codeRuntimeNote">—</span></div>
     </div>
 
-    <div class="form-group"><label>输出 / 错误</label><pre class="code-log" id="codeRuntimeOutput">—</pre></div>
-    <div class="form-group"><label>运行日志</label><pre class="code-log" id="codeRuntimeLog">—</pre></div>
+    <div class="form-group"><div class="code-log-title-row"><label>输出 / 错误</label><button class="btn-secondary btn-clear-log" id="codeClearOutputBtn">清空</button></div><pre class="code-log" id="codeRuntimeOutput">—</pre></div>
+    <div class="form-group"><div class="code-log-title-row"><label>运行日志</label><button class="btn-secondary btn-clear-log" id="codeClearRuntimeLogBtn">清空</button></div><pre class="code-log" id="codeRuntimeLog">—</pre></div>
     <div class="form-group" id="codeConfigPanel" style="display:none"></div>
   </div>
 </aside>
@@ -327,6 +327,7 @@
       <div class="runtime-item"><label>可迭代预算</label><input type="number" id="codeCfgIterBudget" /><span class="unit">项</span><button class="info-dot" data-help="限制 range/enumerate 规模；0 表示不限制。">!</button></div>
       <div class="runtime-item"><label>输出上限(字符)</label><input type="number" id="codeCfgOutputChars" /><span class="unit">字符</span><button class="info-dot" data-help="stdout 最多保留字符数；0 表示不限制。">!</button></div>
       <div class="runtime-item"><label>输出上限(行)</label><input type="number" id="codeCfgOutputLines" /><span class="unit">行</span><button class="info-dot" data-help="stdout 最多保留行数；0 表示不限制。">!</button></div>
+      <div class="runtime-item"><label>运行日志上限</label><input type="number" id="codeCfgRunLogChars" /><span class="unit">字符</span><button class="info-dot" data-help="run.log 最大保留字符数；0 表示不限制。">!</button></div>
       <div class="runtime-item"><label>HTTP Header 上限</label><input type="number" id="codeCfgHttpHeader" /><span class="unit">字节</span><button class="info-dot" data-help="单请求 header 读取上限；0 表示不限制。">!</button></div>
       <div class="runtime-item"><label>HTTP Body 上限</label><input type="number" id="codeCfgHttpBody" /><span class="unit">字节</span><button class="info-dot" data-help="单请求 body 读取上限；0 表示不限制。">!</button></div>
       <div class="runtime-item"><label>心跳间隔</label><input type="number" id="codeCfgHeartbeatInterval" /><span class="unit">ms</span><button class="info-dot" data-help="软心跳刷新最小间隔；0 表示每次检查都刷新。">!</button></div>

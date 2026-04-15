@@ -315,6 +315,22 @@
   font-size: 0.78rem;
 }
 
+.code-log-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.btn-clear-log {
+  width: auto;
+  min-width: 44px;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
 /* ===== 表单 ===== */
 .form-group {
   display: flex;
