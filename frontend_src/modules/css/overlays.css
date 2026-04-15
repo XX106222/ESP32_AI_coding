@@ -1,0 +1,135 @@
+/* ===== Toast ===== */
+.toast {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 20px;
+  border-radius: 100px;
+  font-size: 0.85rem;
+  z-index: 9999;
+  transition: opacity 0.3s, transform 0.3s;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+}
+.toast.hidden { opacity: 0; transform: translateX(-50%) translateY(10px); pointer-events: none; }
+
+/* ===== 模态框 ===== */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal.hidden { display: none; }
+
+.modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.8);
+}
+
+.modal-content {
+  position: relative;
+  z-index: 1;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+.modal-content img { max-width: 100%; max-height: 85vh; border-radius: 8px; }
+
+.runtime-config-modal {
+  width: min(860px, 92vw);
+  max-height: 88vh;
+  overflow: hidden;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.runtime-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.runtime-config-body {
+  display: grid;
+  gap: 8px;
+  max-height: 60vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.runtime-item {
+  display: grid;
+  grid-template-columns: 180px 1fr 70px 24px;
+  gap: 8px;
+  align-items: center;
+}
+
+.runtime-item .unit {
+  color: var(--text3);
+  font-size: 0.78rem;
+}
+
+.runtime-item input {
+  width: 100%;
+}
+
+.runtime-item-wide {
+  grid-template-columns: 180px 1fr 88px 24px;
+}
+
+.info-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border2);
+  background: var(--bg4);
+  color: var(--text2);
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
+.code-action-row .btn-primary,
+.code-action-row .btn-secondary {
+  flex: 1;
+  width: auto;
+  height: 36px;
+  padding: 0 12px;
+}
+
+.modal-close {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  width: 28px;
+  height: 28px;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ===== 错误消息 ===== */
+.error-message {
+  color: var(--red);
+  background: rgba(248,113,113,0.08);
+  border: 1px solid rgba(248,113,113,0.25);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.875rem;
+}

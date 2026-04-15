@@ -1,0 +1,8 @@
+/* ===== highlight.js 亮色主题覆盖 ===== */
+[data-theme="light"] .message-content pre {
+  background: #f6f8fa !important;
+}
+[data-theme="light"] .hljs {
+  background: #f6f8fa !important;
+  color: #24292e;
+}

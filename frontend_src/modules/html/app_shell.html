@@ -1,0 +1,318 @@
+<!-- ===== 侧边栏 ===== -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">
+      <span class="logo-icon">✦</span>
+      <span class="logo-text">AI Chat Studio</span>
+    </div>
+    <button class="sidebar-toggle" id="sidebarToggle" title="收起侧边栏">‹</button>
+  </div>
+
+  <nav class="sidebar-nav">
+    <button class="nav-btn active" data-tab="chat" title="对话">
+      <span class="nav-icon">💬</span><span class="nav-label">对话</span>
+    </button>
+    <button class="nav-btn" data-tab="settings" title="API 配置">
+      <span class="nav-icon">⚙️</span><span class="nav-label">API 配置</span>
+    </button>
+    <button class="nav-btn" data-tab="history" title="历史记录">
+      <span class="nav-icon">📋</span><span class="nav-label">历史记录</span>
+    </button>
+    <button class="nav-btn" data-tab="device" title="设备管理">
+      <span class="nav-icon">🔌</span><span class="nav-label">设备管理</span>
+    </button>
+    <button class="nav-btn" data-tab="code" title="调试运行">
+      <span class="nav-icon">🧪</span><span class="nav-label">调试运行</span>
+    </button>
+  </nav>
+
+  <!-- API 配置面板 -->
+  <div class="panel" id="panel-settings" style="display:none">
+    <h3 class="panel-title">API 配置</h3>
+
+    <div class="form-group">
+      <label>服务商</label>
+      <select id="providerSelect">
+        <option value="openai">OpenAI</option>
+        <option value="anthropic">Anthropic (Claude)</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="qwen">通义千问 (Qwen)</option>
+        <option value="zhipu">智谱 AI (GLM)</option>
+        <option value="ollama">Ollama (本地)</option>
+        <option value="custom">自定义</option>
+      </select>
+    </div>
+
+    <div class="form-group" id="baseUrlGroup">
+      <label>Base URL</label>
+      <input type="text" id="baseUrl" placeholder="https://api.openai.com/v1" />
+    </div>
+
+    <div class="form-group" id="apiKeyGroup">
+      <label>API Key</label>
+      <div class="input-with-btn">
+        <input type="password" id="apiKey" placeholder="sk-..." />
+        <button class="icon-btn" id="toggleKey" title="显示/隐藏">👁</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>模型</label>
+      <div class="input-with-btn">
+        <input type="text" id="modelName" placeholder="gpt-4o" list="modelList" />
+        <button class="icon-btn" id="fetchModels" title="拉取模型列表">↻</button>
+      </div>
+      <datalist id="modelList"></datalist>
+      <select id="ollamaModelSelect" style="display:none;margin-top:6px">
+        <option value="">-- 选择模型 --</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>系统提示词</label>
+      <textarea id="systemPrompt" rows="4" placeholder="你是一个有帮助的 AI 助手..."></textarea>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group half">
+        <label>Temperature <span id="tempVal">0.7</span></label>
+        <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7" />
+      </div>
+      <div class="form-group half">
+        <label>Max Tokens</label>
+        <input type="number" id="maxTokens" value="4096" min="1" max="128000" />
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="checkbox-label">
+        <input type="checkbox" id="streamMode" checked />
+        <span>流式输出 (Streaming)</span>
+      </label>
+    </div>
+
+    <button class="btn-primary" id="saveConfig">保存配置</button>
+    <div id="configStatus" class="config-status"></div>
+  </div>
+
+  <div class="panel" id="panel-history" style="display:none">
+    <h3 class="panel-title">对话历史</h3>
+    <button class="btn-secondary" id="newChat">＋ 新对话</button>
+    <div id="historyList" class="history-list"></div>
+  </div>
+
+  <div class="panel" id="panel-device" style="display:none">
+    <h3 class="panel-title">设备管理</h3>
+    <div class="device-tabs">
+      <button class="device-tab-btn active" data-device-tab="system" title="系统信息">📊 系统</button>
+      <button class="device-tab-btn" data-device-tab="gpio" title="GPIO 管理">🔌 GPIO</button>
+      <button class="device-tab-btn" data-device-tab="led" title="板载LED">💡 板载LED</button>
+      <button class="device-tab-btn" data-device-tab="servo" title="舵机控制">🎚️ 舵机</button>
+    </div>
+
+    <div class="device-tab-content" id="device-tab-system" style="display:block">
+      <h4>系统资源</h4>
+      <div class="system-info-item">
+        <span class="system-label">内存占用</span>
+        <div class="progress-bar">
+          <div class="progress-fill" id="memoryProgress" style="width:0%"></div>
+        </div>
+        <span class="system-value" id="memoryValue">—</span>
+      </div>
+    </div>
+
+    <div class="device-tab-content" id="device-tab-led" style="display:none">
+      <h4>板载 LED (WS2812 / GPIO48)</h4>
+      <div class="board-led-panel">
+        <div class="board-led-row">
+          <select id="boardLedPreset">
+            <option value="255,0,0">红</option>
+            <option value="255,128,0">橙</option>
+            <option value="255,255,0">黄</option>
+            <option value="0,255,0">绿</option>
+            <option value="0,255,255">青</option>
+            <option value="0,0,255">蓝</option>
+            <option value="128,0,255">紫</option>
+          </select>
+          <input type="color" id="boardLedColor" value="#00ff00" />
+        </div>
+        <div class="board-led-row">
+          <select id="boardLedMode">
+            <option value="static">常亮</option>
+            <option value="breath">呼吸</option>
+            <option value="blink_fast">快闪</option>
+            <option value="blink_slow">慢闪</option>
+            <option value="multi_flash">多色闪</option>
+          </select>
+          <button class="btn-secondary" id="boardLedOnBtn">应用</button>
+          <button class="btn-secondary" id="boardLedOffBtn">熄灭</button>
+        </div>
+        <div class="system-value" id="boardLedStatus">检测中…</div>
+      </div>
+    </div>
+
+    <div class="device-tab-content" id="device-tab-gpio" style="display:none">
+      <h4>GPIO 状态</h4>
+      <div class="gpio-io-panel">
+        <div class="gpio-io-row">
+          <select id="gpioWritePin"><option value="">写入端口</option></select>
+          <select id="gpioWriteValue"><option value="1">高电平 (1)</option><option value="0">低电平 (0)</option></select>
+          <button class="btn-secondary" id="gpioWriteBtn">写入</button>
+        </div>
+        <div class="gpio-io-row">
+          <select id="gpioReadPin"><option value="">读取端口</option></select>
+          <button class="btn-secondary" id="gpioReadBtn">读取</button>
+          <span class="gpio-read-result" id="gpioReadResult">—</span>
+        </div>
+      </div>
+      <div class="gpio-list" id="gpioList"></div>
+    </div>
+
+    <div class="device-tab-content" id="device-tab-servo" style="display:none">
+      <h4>舵机配置</h4>
+      <div class="servo-config-panel">
+        <div class="form-group"><label>GPIO 端口</label><select id="servoPin"><option value="">-- 选择可用端口 --</option></select></div>
+        <div class="form-group"><label>PWM 频率 (Hz)</label><input type="number" id="servoFreq" value="50" min="1" max="100" /></div>
+        <div class="form-group"><label>最小脉宽 (μs)</label><input type="number" id="servoMinUs" value="500" min="400" max="2000" /></div>
+        <div class="form-group"><label>最大脉宽 (μs)</label><input type="number" id="servoMaxUs" value="2500" min="1500" max="2600" /></div>
+        <div class="form-group"><label>舵机模式</label><select id="servoMode"><option value="angle">角度舵机</option><option value="continuous">连续旋转舵机</option></select></div>
+        <div class="form-group" id="servoContinuousCfg" style="display:none">
+          <label>停止脉宽 / 速度范围</label>
+          <div class="form-row"><input type="number" id="servoNeutralUs" value="1500" min="1200" max="1800" /><input type="number" id="servoSpanUs" value="300" min="20" max="700" /></div>
+        </div>
+        <button class="btn-primary" id="configServoBtn">配置舵机</button>
+      </div>
+      <h4 style="margin-top:16px">已配置舵机（可删除释放 IO）</h4>
+      <div class="servo-list" id="servoList"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-code" style="display:none">
+    <div class="panel-title-row"><h3 class="panel-title">调试 · 运行 · 固化</h3><button class="icon-btn" id="codeConfigToggleBtn" title="运行配置">⚙</button></div>
+    <div class="form-group"><label>代码来源</label><select id="codeRunSource"><option value="draft">草稿运行</option><option value="active">当前固化版本运行</option></select></div>
+    <div class="form-group"><label>草稿代码</label><textarea id="codeEditor" rows="12" placeholder="# 使用 gpio_write / gpio_read / led_set / servo_angle / servo_speed\nprint('hello')"></textarea></div>
+
+    <div class="form-row code-action-row"><button class="btn-secondary" id="codeLoadDraftBtn">加载草稿</button><button class="btn-secondary" id="codeSaveDraftBtn">保存草稿</button></div>
+    <div class="form-row code-action-row"><button class="btn-secondary" id="codeLoadActiveBtn">加载代码</button><button class="btn-primary" id="codePersistBtn">固化草稿为当前版本</button></div>
+    <div class="form-row code-action-row"><button class="btn-primary" id="codeRunBtn">运行</button><button class="btn-secondary" id="codeStopBtn">停止</button></div>
+    <div class="form-row code-action-row"><button class="btn-secondary" id="codeRefreshStatusBtn">刷新状态</button></div>
+
+    <div class="code-history-box">
+      <div class="code-history-header"><b>版本历史</b><button class="btn-secondary code-history-refresh" id="codeHistoryRefreshBtn">刷新历史</button></div>
+      <div class="code-history-list" id="codeHistoryList">—</div>
+      <div class="code-history-meta" id="codeHistoryMeta">—</div>
+      <pre class="code-log code-history-preview" id="codeHistoryPreview">—</pre>
+      <div class="form-row code-action-row"><button class="btn-secondary" id="codeHistoryLoadDraftBtn">恢复到草稿</button><button class="btn-primary" id="codeHistoryPersistBtn">设为当前固化</button></div>
+    </div>
+
+    <div class="code-runtime-box">
+      <div><b>运行状态:</b> <span id="codeRuntimeStatus">idle</span></div>
+      <div><b>作业 ID:</b> <span id="codeRuntimeJob">—</span></div>
+      <div><b>耗时:</b> <span id="codeRuntimeDuration">—</span></div>
+      <div><b>版本:</b> <span id="codeRuntimeVersion">—</span></div>
+      <div><b>备注:</b> <span id="codeRuntimeNote">—</span></div>
+    </div>
+
+    <div class="form-group"><label>输出 / 错误</label><pre class="code-log" id="codeRuntimeOutput">—</pre></div>
+    <div class="form-group"><label>运行日志</label><pre class="code-log" id="codeRuntimeLog">—</pre></div>
+    <div class="form-group" id="codeConfigPanel" style="display:none"></div>
+  </div>
+</aside>
+
+<div id="sidebarResizer" class="sidebar-resizer" title="拖拽调整侧栏宽度"></div>
+
+<main class="main" id="main">
+  <header class="topbar">
+    <button class="icon-btn menu-btn" id="menuBtn" title="展开侧边栏">☰</button>
+    <div class="model-badge" id="currentModelBadge">未配置</div>
+    <div class="topbar-actions">
+      <button class="icon-btn theme-btn" id="themeToggle" title="切换主题">🌙</button>
+      <button class="icon-btn" id="clearChat" title="清空对话">🗑</button>
+      <button class="icon-btn" id="exportChat" title="导出对话">⬇</button>
+    </div>
+  </header>
+
+  <div class="stats-bar" id="statsBar">
+    <div class="stat-item"><span class="stat-label">输入 Tokens</span><span class="stat-value" id="statIn">—</span></div>
+    <div class="stat-sep">·</div>
+    <div class="stat-item"><span class="stat-label">输出 Tokens</span><span class="stat-value" id="statOut">—</span></div>
+    <div class="stat-sep">·</div>
+    <div class="stat-item"><span class="stat-label">总计</span><span class="stat-value" id="statTotal">—</span></div>
+    <div class="stat-sep">·</div>
+    <div class="stat-item"><span class="stat-label">上下文长度</span><span class="stat-value" id="statContext">—</span></div>
+    <div class="stat-sep">·</div>
+    <div class="stat-item"><span class="stat-label">设备状态</span><span class="stat-value" id="statDevice">检测中</span><button class="stat-refresh-btn" id="refreshDeviceStatus" title="刷新设备状态">↻</button></div>
+  </div>
+
+  <div class="chat-container" id="chatContainer">
+    <div class="welcome-screen" id="welcomeScreen">
+      <div class="welcome-icon">✦</div>
+      <h2>AI Chat Studio</h2>
+      <p>配置 API 后开始对话，支持流式输出、思考过程展示和 Token 统计。</p>
+      <div class="quick-actions">
+        <button class="quick-btn" onclick="insertPrompt('你好！请介绍一下你自己。')">👋 自我介绍</button>
+        <button class="quick-btn" onclick="insertPrompt('用 Python 写一个快速排序算法')">💻 代码示例</button>
+        <button class="quick-btn" onclick="insertPrompt('解释一下量子纠缠的原理')">🔬 科学解答</button>
+        <button class="quick-btn" onclick="insertPrompt('帮我写一首关于春天的诗')">✍️ 创意写作</button>
+      </div>
+    </div>
+    <div id="messageList" class="message-list"></div>
+  </div>
+
+  <div class="input-area">
+    <div id="attachmentPreview" class="attachment-preview"></div>
+    <div class="input-wrapper">
+      <textarea id="userInput" placeholder="输入消息… (Enter 发送，Shift+Enter 换行)" rows="1"></textarea>
+      <div class="input-actions">
+        <button class="icon-btn attach-btn" id="attachBtn" title="上传文件">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        </button>
+        <button class="send-btn" id="sendBtn" title="发送">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
+      </div>
+    </div>
+    <div class="input-footer"><span id="charCount" class="char-count">0 字</span><span class="hint">Enter 发送 · Shift+Enter 换行</span></div>
+  </div>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<div class="modal hidden" id="imageModal">
+  <div class="modal-overlay" id="modalOverlay"></div>
+  <div class="modal-content">
+    <img id="modalImg" src="" alt="" />
+    <button class="modal-close" id="modalClose">✕</button>
+  </div>
+</div>
+
+<div class="modal hidden" id="codeConfigModal">
+  <div class="modal-overlay" id="codeConfigModalOverlay"></div>
+  <div class="modal-content runtime-config-modal">
+    <div class="runtime-config-header">
+      <h3>运行配置（保存到 Flash）</h3>
+      <button class="modal-close" id="codeConfigModalClose">✕</button>
+    </div>
+    <div class="runtime-config-body">
+      <div class="runtime-item"><label>代码文本上限</label><input type="number" id="codeCfgTextLimit" /><span class="unit">字符</span><button class="info-dot" data-help="限制草稿/运行代码最大长度；0 表示不限制。">!</button></div>
+      <div class="runtime-item"><label>调用预算</label><input type="number" id="codeCfgCallBudget" /><span class="unit">次</span><button class="info-dot" data-help="限制函数/API 总调用次数；0 表示不限制。">!</button></div>
+      <div class="runtime-item"><label>可迭代预算</label><input type="number" id="codeCfgIterBudget" /><span class="unit">项</span><button class="info-dot" data-help="限制 range/enumerate 规模；0 表示不限制。">!</button></div>
+      <div class="runtime-item"><label>输出上限(字符)</label><input type="number" id="codeCfgOutputChars" /><span class="unit">字符</span><button class="info-dot" data-help="stdout 最多保留字符数；0 表示不限制。">!</button></div>
+      <div class="runtime-item"><label>输出上限(行)</label><input type="number" id="codeCfgOutputLines" /><span class="unit">行</span><button class="info-dot" data-help="stdout 最多保留行数；0 表示不限制。">!</button></div>
+      <div class="runtime-item"><label>HTTP Header 上限</label><input type="number" id="codeCfgHttpHeader" /><span class="unit">字节</span><button class="info-dot" data-help="单请求 header 读取上限；0 表示不限制。">!</button></div>
+      <div class="runtime-item"><label>HTTP Body 上限</label><input type="number" id="codeCfgHttpBody" /><span class="unit">字节</span><button class="info-dot" data-help="单请求 body 读取上限；0 表示不限制。">!</button></div>
+      <div class="runtime-item"><label>心跳间隔</label><input type="number" id="codeCfgHeartbeatInterval" /><span class="unit">ms</span><button class="info-dot" data-help="软心跳刷新最小间隔；0 表示每次检查都刷新。">!</button></div>
+      <div class="runtime-item"><label>心跳失联判定</label><input type="number" id="codeCfgHeartbeatStall" /><span class="unit">ms</span><button class="info-dot" data-help="循环心跳失联判定阈值；0 表示不限制。">!</button></div>
+      <div class="runtime-item runtime-item-wide"><label>说明</label><span class="unit">已移除“执行超时”独立项，运行中统一使用“心跳失联判定”。</span></div>
+      <div class="runtime-item runtime-item-wide"><label>import 黑名单</label><input type="text" id="codeCfgImportBlocklist" placeholder="os,uos,sys,socket,network,_thread" /><span class="unit">逗号分隔</span><button class="info-dot" data-help="黑名单模块禁止 import，例如 os,socket,network,_thread。">!</button></div>
+    </div>
+    <div class="form-row">
+      <button class="btn-secondary" id="codeLoadCfgBtn">加载配置</button>
+      <button class="btn-primary" id="codeSaveCfgBtn">保存配置</button>
+    </div>
+    <div class="form-row">
+      <button class="btn-secondary" id="codeResetCfgBtn">恢复默认配置</button>
+    </div>
+  </div>
+</div>
+

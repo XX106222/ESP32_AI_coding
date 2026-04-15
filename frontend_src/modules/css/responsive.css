@@ -1,0 +1,18 @@
+/* ===== 响应式 ===== */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    left: calc(-1 * var(--sidebar-w));
+    height: 100%;
+    transition: left var(--transition);
+    box-shadow: var(--shadow);
+  }
+  .sidebar.mobile-open { left: 0; }
+  .sidebar.collapsed { left: calc(-1 * var(--sidebar-w)); }
+  .sidebar-resizer { display: none; }
+  .menu-btn { display: flex !important; }
+  .topbar { padding: 10px 14px; }
+  .chat-container { padding: 14px; }
+  .stats-bar { padding: 5px 14px; font-size: 0.72rem; }
+  .input-area { padding: 12px 14px 10px; }
+}
