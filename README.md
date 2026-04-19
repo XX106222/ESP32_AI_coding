@@ -39,7 +39,7 @@ pip install esptool mpremote
 
 ```powershell
 python -m esptool --chip esp32s3 --port COM12 erase_flash
-python -m esptool --chip esp32s3 --port COM12 --baud 460800 write_flash -z 0x0 .\ESP32_GENERIC_S3-xxxx.bin
+python -m esptool --chip esp32s3 --port COM12 --baud 115200 write_flash -z 0x0 .\ESP32_GENERIC_S3-xxxx.bin
 ```
 
 刷写后可做简单验证：
@@ -47,6 +47,8 @@ python -m esptool --chip esp32s3 --port COM12 --baud 460800 write_flash -z 0x0 .
 ```powershell
 mpremote connect COM12 exec "import sys; print(sys.implementation)"
 ```
+
+或者使用乐鑫官方工具刷写固件
 
 ### 3. 配置 WiFi
 
