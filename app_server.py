@@ -18,6 +18,7 @@ from app_common import (
 )
 from app_code import boot_autorun_active_code, code_prepare_dirs, handle_code_api
 from app_agent import agent_prepare_dirs, handle_agent_api
+from app_serial import handle_serial_api, serial_prepare, serial_tick
 from app_device import (
     can_use_gpio,
     init_board_led,
@@ -70,6 +71,8 @@ def route_request(client, method, path, body, wlan):
         if handle_code_api(client, method, api_path, query_string, body):
             return
         if handle_agent_api(client, method, api_path, query_string, body):
+            return
+        if handle_serial_api(client, method, api_path, query_string, body):
             return
 
         if api_path == "/api/config":
@@ -467,6 +470,7 @@ def run_server(wlan):
 
     while True:
         update_led_animation()
+        serial_tick()
         try:
             client, _remote_addr = server.accept()
         except OSError:
@@ -496,6 +500,7 @@ def main():
     ensure_dir(st.DATA_DIR)
     code_prepare_dirs()
     agent_prepare_dirs()
+    serial_prepare()
 
     if read_json(st.CONFIG_FILE, None) is None:
         atomic_write_json(st.CONFIG_FILE, st.DEFAULT_CONFIG)

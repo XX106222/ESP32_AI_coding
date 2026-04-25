@@ -1,4 +1,3 @@
-
 try:
     import ujson as json
 except ImportError:
@@ -10,9 +9,9 @@ except ImportError:
     network = None
 
 try:
-    from machine import Pin, PWM
+    from machine import Pin, PWM, UART
 except ImportError:
-    Pin, PWM = None, None
+    Pin, PWM, UART = None, None, None
 
 try:
     import neopixel
@@ -202,3 +201,36 @@ MIME_TYPES = {
     ".ico": "image/x-icon",
 }
 
+SERIAL_UART_PIN_MAP = {
+    0: {"rx": 44, "tx": 43},
+    1: {"rx": 18, "tx": 17},
+    2: {"rx": 16, "tx": 15},
+}
+SERIAL_BAUDRATE = 115200
+SERIAL_RX_BUFFER_EVENTS = 300
+SERIAL_RX_CHUNK_BYTES = 256
+
+DEFAULT_SERIAL_CONFIG = {
+    "uartId": 1,
+    "baudrate": SERIAL_BAUDRATE,
+    "bits": 8,
+    "parity": "N",
+    "stop": 1,
+    "rx": SERIAL_UART_PIN_MAP[1]["rx"],
+    "tx": SERIAL_UART_PIN_MAP[1]["tx"],
+    "displayHex": False,
+    "presets": [
+        {"name": "AT", "data": "AT", "format": "ascii"},
+        {"name": "AT+RST", "data": "AT+RST", "format": "ascii"},
+    ],
+}
+
+SERIAL_CONFIG = None
+SERIAL_RUNTIME = {
+    "uart": None,
+    "opened": False,
+    "lastError": "",
+    "seq": 0,
+    "events": [],
+    "pins": {"rx": None, "tx": None},
+}

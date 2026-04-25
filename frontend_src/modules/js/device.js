@@ -4,6 +4,12 @@ var selectedCodeHistoryVersion = '';
 var selectedCodeHistoryCode = '';
 var codeRunTransitioning = false;
 var codeSwitchSaving = false;
+var serialPollTimer = null;
+var serialSinceSeq = 0;
+var serialSchemaCache = null;
+var serialPresetsCache = [];
+var serialAppliedPins = { rx: null, tx: null };
+var serialSafePins = [];
 
 function sleepMs(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -955,4 +961,340 @@ function startSidebarResize(e) {
   document.addEventListener('mouseup', onUp);
 }
 
-// ...existing code...
+function isSerialTabVisible() {
+  const node = document.getElementById('device-tab-serial');
+  if (!node) return false;
+  return node.style.display !== 'none';
+}
+
+function stopSerialPolling() {
+  if (serialPollTimer) {
+    clearInterval(serialPollTimer);
+    serialPollTimer = null;
+  }
+}
+
+function startSerialPolling() {
+  if (serialPollTimer) return;
+  serialPollTimer = setInterval(() => {
+    pollSerialRx(true);
+  }, 350);
+}
+
+function renderSerialPresetOptions(presets) {
+  if (!el.serialPresetSelect) return;
+  const list = Array.isArray(presets) ? presets : [];
+  el.serialPresetSelect.innerHTML = '<option value="">-- 选择指令 --</option>';
+  list.forEach((item, idx) => {
+    const opt = document.createElement('option');
+    opt.value = String(idx);
+    opt.textContent = `${item.name} (${(item.format || 'ascii').toUpperCase()})`;
+    el.serialPresetSelect.appendChild(opt);
+  });
+}
+
+function updateSerialPinHint() {
+  if (!el.serialPinHint) return;
+  const uartId = Number.parseInt(el.serialUartId?.value || '', 10);
+  const selRx = Number.parseInt(el.serialRxPin?.value || '', 10);
+  const selTx = Number.parseInt(el.serialTxPin?.value || '', 10);
+  let mapped = '';
+  if (serialSchemaCache?.uartOptions && Number.isInteger(uartId)) {
+    const m = serialSchemaCache.uartOptions.find(x => Number(x.uartId) === uartId);
+    if (m) mapped = `UART${uartId} 接线: RX GPIO${m.rx} / TX GPIO${m.tx}`;
+  }
+
+  let selected = '';
+  if (Number.isInteger(selRx) && Number.isInteger(selTx)) {
+    selected = `已选择: RX GPIO${selRx} / TX GPIO${selTx}`;
+  }
+
+  let applied = '';
+  const rx = Number(serialAppliedPins?.rx);
+  const tx = Number(serialAppliedPins?.tx);
+  if (Number.isInteger(rx) && Number.isInteger(tx)) {
+    applied = `当前应用: RX GPIO${rx} / TX GPIO${tx}`;
+  }
+
+  el.serialPinHint.textContent = [mapped, selected, applied].filter(Boolean).join(' | ') || '—';
+}
+
+function renderSerialPinSelects() {
+  const pins = Array.isArray(serialSafePins) ? serialSafePins : [];
+  const render = (node, chosen) => {
+    if (!node) return;
+    const old = Number.parseInt(String(chosen ?? node.value ?? ''), 10);
+    node.innerHTML = '';
+    pins.forEach(pin => {
+      const opt = document.createElement('option');
+      opt.value = String(pin);
+      opt.textContent = `GPIO ${pin}`;
+      node.appendChild(opt);
+    });
+    if (Number.isInteger(old) && pins.includes(old)) {
+      node.value = String(old);
+    } else if (pins.length > 0) {
+      node.value = String(pins[0]);
+    }
+  };
+  render(el.serialRxPin, serialAppliedPins?.rx);
+  render(el.serialTxPin, serialAppliedPins?.tx);
+}
+
+function fillSerialConfigForm(payload) {
+  const cfg = payload?.config || {};
+  if (el.serialUartId) el.serialUartId.value = String(cfg.uartId ?? 1);
+  if (el.serialBaudrate) el.serialBaudrate.value = String(cfg.baudrate ?? 115200);
+  if (el.serialBits) el.serialBits.value = String(cfg.bits ?? 8);
+  if (el.serialParity) el.serialParity.value = String(cfg.parity ?? 'N');
+  if (el.serialStop) el.serialStop.value = String(cfg.stop ?? 1);
+  if (el.serialHexView) el.serialHexView.checked = !!cfg.displayHex;
+
+  serialAppliedPins = {
+    rx: payload?.pins?.rx ?? cfg.rx ?? null,
+    tx: payload?.pins?.tx ?? cfg.tx ?? null,
+  };
+  renderSerialPinSelects();
+  if (el.serialRxPin && serialAppliedPins.rx != null) el.serialRxPin.value = String(serialAppliedPins.rx);
+  if (el.serialTxPin && serialAppliedPins.tx != null) el.serialTxPin.value = String(serialAppliedPins.tx);
+  updateSerialPinHint();
+}
+
+function readSerialConfigForm() {
+  const parseNum = (v, fallback) => {
+    const n = Number.parseInt(String(v ?? ''), 10);
+    return Number.isNaN(n) ? fallback : n;
+  };
+  return {
+    uartId: parseNum(el.serialUartId?.value, 1),
+    baudrate: parseNum(el.serialBaudrate?.value, 115200),
+    bits: parseNum(el.serialBits?.value, 8),
+    parity: String(el.serialParity?.value || 'N'),
+    stop: parseNum(el.serialStop?.value, 1),
+    rx: parseNum(el.serialRxPin?.value, serialAppliedPins?.rx ?? 18),
+    tx: parseNum(el.serialTxPin?.value, serialAppliedPins?.tx ?? 17),
+    displayHex: !!el.serialHexView?.checked,
+  };
+}
+
+function onSerialUartChanged() {
+  const uartId = Number.parseInt(el.serialUartId?.value || '', 10);
+  if (Number.isInteger(uartId) && Array.isArray(serialSchemaCache?.uartOptions)) {
+    const info = serialSchemaCache.uartOptions.find(x => Number(x.uartId) === uartId);
+    if (info) {
+      if (el.serialRxPin && serialSafePins.includes(Number(info.rx))) el.serialRxPin.value = String(info.rx);
+      if (el.serialTxPin && serialSafePins.includes(Number(info.tx))) el.serialTxPin.value = String(info.tx);
+    }
+  }
+  updateSerialPinHint();
+}
+
+async function loadSerialSchema() {
+  if (serialSchemaCache) return serialSchemaCache;
+  const schema = await apiGet('/device/serial/schema');
+  serialSchemaCache = schema || {};
+
+  if (el.serialUartId) {
+    el.serialUartId.innerHTML = '';
+    const opts = Array.isArray(serialSchemaCache.uartOptions) ? serialSchemaCache.uartOptions : [];
+    opts.forEach(item => {
+      const opt = document.createElement('option');
+      opt.value = String(item.uartId);
+      opt.textContent = item.label || `UART${item.uartId}`;
+      el.serialUartId.appendChild(opt);
+    });
+  }
+  serialSafePins = Array.isArray(serialSchemaCache.safePins) ? serialSchemaCache.safePins.map(x => Number(x)).filter(Number.isInteger) : [];
+  renderSerialPinSelects();
+  return serialSchemaCache;
+}
+
+function renderSerialLogItems(items) {
+  if (!el.serialLog) return;
+  const useHex = !!el.serialHexView?.checked;
+  const prev = el.serialLog.textContent && el.serialLog.textContent !== '—' ? `${el.serialLog.textContent}\n` : '';
+  const lines = (Array.isArray(items) ? items : []).map(item => {
+    const ts = Number(item?.ts || 0);
+    const seq = Number(item?.seq || 0);
+    const dir = String(item?.dir || '').toUpperCase();
+    const body = useHex ? String(item?.hex || '') : String(item?.ascii || '');
+    return `[${ts}] #${seq} ${dir}: ${body}`;
+  });
+  const all = (prev + lines.join('\n')).trim();
+  const clipped = all.length > 20000 ? all.slice(all.length - 20000) : all;
+  el.serialLog.textContent = clipped || '—';
+  el.serialLog.scrollTop = el.serialLog.scrollHeight;
+}
+
+async function pollSerialRx(silent = true) {
+  if (!isSerialTabVisible()) return;
+  try {
+    const data = await apiGet(`/device/serial/rx?since=${encodeURIComponent(serialSinceSeq)}&limit=200`);
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (items.length > 0) {
+      renderSerialLogItems(items);
+      serialSinceSeq = Number(items[items.length - 1]?.seq || serialSinceSeq);
+    } else {
+      serialSinceSeq = Number(data?.nextSeq || serialSinceSeq);
+    }
+  } catch (e) {
+    if (!silent) showToast('串口日志刷新失败: ' + e.message);
+  }
+}
+
+async function loadSerialPresets() {
+  try {
+    const data = await apiGet('/device/serial/presets');
+    serialPresetsCache = Array.isArray(data?.presets) ? data.presets : [];
+    renderSerialPresetOptions(serialPresetsCache);
+  } catch (e) {
+    showToast('加载常用指令失败: ' + e.message);
+  }
+}
+
+async function loadSerialAssistant(silent = false) {
+  if (!el.serialUartId) return;
+  try {
+    await loadSerialSchema();
+    const cfg = await apiGet('/device/serial/config');
+    fillSerialConfigForm(cfg);
+    serialSinceSeq = 0;
+    if (el.serialLog) el.serialLog.textContent = '—';
+    await loadSerialPresets();
+    await pollSerialRx(true);
+    startSerialPolling();
+    if (!silent) showToast('串口助手已加载');
+  } catch (e) {
+    if (!silent) showToast('加载串口助手失败: ' + e.message);
+  }
+}
+
+
+async function saveSerialConfig() {
+  try {
+    const payload = readSerialConfigForm();
+    const ret = await apiPost('/device/serial/config', payload);
+    fillSerialConfigForm(ret);
+    showToast('串口配置已保存并应用');
+  } catch (e) {
+    showToast('保存串口配置失败: ' + e.message);
+  }
+}
+
+async function sendSerialPayload() {
+  const data = String(el.serialTxInput?.value || '');
+  if (!data.trim()) {
+    showToast('请输入发送内容');
+    return;
+  }
+  try {
+    const format = String(el.serialTxFormat?.value || 'ascii');
+    const ret = await apiPost('/device/serial/tx', { data, format });
+    showToast(`已发送 ${ret?.written || 0} 字节`);
+    await pollSerialRx(true);
+  } catch (e) {
+    showToast('串口发送失败: ' + e.message);
+  }
+}
+
+function onSerialPresetChange() {
+  const idx = Number.parseInt(el.serialPresetSelect?.value || '', 10);
+  const preset = Number.isInteger(idx) ? serialPresetsCache[idx] : null;
+  if (!preset) return;
+  if (el.serialPresetName) el.serialPresetName.value = preset.name || '';
+  if (el.serialPresetValue) el.serialPresetValue.value = preset.data || '';
+  if (el.serialPresetFormat) el.serialPresetFormat.value = preset.format || 'ascii';
+  if (el.serialTxInput) el.serialTxInput.value = preset.data || '';
+  if (el.serialTxFormat) el.serialTxFormat.value = preset.format || 'ascii';
+}
+
+async function saveSerialPreset() {
+  const name = String(el.serialPresetName?.value || '').trim();
+  const data = String(el.serialPresetValue?.value || '');
+  const format = String(el.serialPresetFormat?.value || 'ascii');
+  if (!name) {
+    showToast('请填写指令名称');
+    return;
+  }
+  try {
+    await apiPost('/device/serial/presets', {
+      action: 'upsert',
+      name,
+      data,
+      format,
+    });
+    await loadSerialPresets();
+    showToast('常用指令已保存');
+  } catch (e) {
+    showToast('保存常用指令失败: ' + e.message);
+  }
+}
+
+async function deleteSerialPreset() {
+  const idx = Number.parseInt(el.serialPresetSelect?.value || '', 10);
+  const preset = Number.isInteger(idx) ? serialPresetsCache[idx] : null;
+  if (!preset) {
+    showToast('请先选择常用指令');
+    return;
+  }
+  try {
+    await apiPost('/device/serial/presets', {
+      action: 'delete',
+      name: preset.name,
+    });
+    await loadSerialPresets();
+    if (el.serialPresetName) el.serialPresetName.value = '';
+    if (el.serialPresetValue) el.serialPresetValue.value = '';
+    showToast('常用指令已删除');
+  } catch (e) {
+    showToast('删除常用指令失败: ' + e.message);
+  }
+}
+
+async function sendSelectedSerialPreset() {
+  const idx = Number.parseInt(el.serialPresetSelect?.value || '', 10);
+  const preset = Number.isInteger(idx) ? serialPresetsCache[idx] : null;
+  if (!preset) {
+    showToast('请先选择常用指令');
+    return;
+  }
+  try {
+    const ret = await apiPost('/device/serial/tx', {
+      data: preset.data || '',
+      format: preset.format || 'ascii',
+    });
+    showToast(`已发送常用指令: ${preset.name} (${ret?.written || 0} 字节)`);
+    await pollSerialRx(true);
+  } catch (e) {
+    showToast('发送常用指令失败: ' + e.message);
+  }
+}
+
+async function clearSerialLog() {
+  try {
+    await apiPost('/device/serial/clear', {});
+    serialSinceSeq = 0;
+    if (el.serialLog) el.serialLog.textContent = '—';
+    showToast('串口日志已清空');
+  } catch (e) {
+    showToast('清空串口日志失败: ' + e.message);
+  }
+}
+
+async function refreshSerialLogView() {
+  serialSinceSeq = 0;
+  if (el.serialLog) el.serialLog.textContent = '—';
+  await pollSerialRx(true);
+}
+
+window.loadSerialAssistant = loadSerialAssistant;
+window.stopSerialPolling = stopSerialPolling;
+window.saveSerialConfig = saveSerialConfig;
+window.sendSerialPayload = sendSerialPayload;
+window.saveSerialPreset = saveSerialPreset;
+window.deleteSerialPreset = deleteSerialPreset;
+window.sendSelectedSerialPreset = sendSelectedSerialPreset;
+window.clearSerialLog = clearSerialLog;
+window.refreshSerialLogView = refreshSerialLogView;
+window.onSerialPresetChange = onSerialPresetChange;
+window.onSerialUartChanged = onSerialUartChanged;

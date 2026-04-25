@@ -129,6 +129,7 @@
       <button class="device-tab-btn" data-device-tab="gpio" title="GPIO 管理">🔌 GPIO</button>
       <button class="device-tab-btn" data-device-tab="led" title="板载LED">💡 板载LED</button>
       <button class="device-tab-btn" data-device-tab="servo" title="舵机控制">🎚️ 舵机</button>
+      <button class="device-tab-btn" data-device-tab="serial" title="串口助手">🧰 串口</button>
     </div>
 
     <div class="device-tab-content" id="device-tab-system" style="display:block">
@@ -205,6 +206,61 @@
       </div>
       <h4 style="margin-top:16px">已配置舵机（可删除释放 IO）</h4>
       <div class="servo-list" id="servoList"></div>
+    </div>
+
+    <div class="device-tab-content" id="device-tab-serial" style="display:none">
+      <h4>串口助手</h4>
+      <div class="serial-panel">
+        <div class="serial-grid">
+          <div class="form-group"><label>串口号</label><select id="serialUartId"></select></div>
+          <div class="form-group"><label>波特率</label><select id="serialBaudrate"><option value="9600">9600</option><option value="19200">19200</option><option value="38400">38400</option><option value="57600">57600</option><option value="115200">115200</option><option value="230400">230400</option><option value="460800">460800</option><option value="921600">921600</option></select></div>
+          <div class="form-group"><label>数据位</label><select id="serialBits"><option value="8">8</option><option value="7">7</option><option value="6">6</option><option value="5">5</option></select></div>
+          <div class="form-group"><label>校验位</label><select id="serialParity"><option value="N">无</option><option value="E">偶校验</option><option value="O">奇校验</option></select></div>
+          <div class="form-group"><label>停止位</label><select id="serialStop"><option value="1">1</option><option value="2">2</option></select></div>
+          <div class="form-group"><label>RX GPIO</label><select id="serialRxPin"></select></div>
+          <div class="form-group"><label>TX GPIO</label><select id="serialTxPin"></select></div>
+        </div>
+        <div class="serial-row">
+          <span class="system-value" id="serialPinHint">—</span>
+          <label class="checkbox-label"><input type="checkbox" id="serialHexView" /><span>HEX 显示</span></label>
+          <button class="btn-secondary" id="serialRefreshCfgBtn">刷新</button>
+          <button class="btn-primary" id="serialSaveCfgBtn">保存并应用</button>
+        </div>
+      </div>
+
+      <div class="serial-panel">
+        <div class="serial-log-head">
+          <b>收发日志</b>
+          <button class="btn-secondary" id="serialClearLogBtn">清空</button>
+        </div>
+        <pre class="code-log serial-log" id="serialLog">—</pre>
+      </div>
+
+      <div class="serial-panel">
+        <div class="form-group">
+          <label>发送内容</label>
+          <textarea id="serialTxInput" rows="4" placeholder="ASCII 或 HEX（例如: 41 54 0D 0A）"></textarea>
+        </div>
+        <div class="serial-row">
+          <select id="serialTxFormat"><option value="ascii">ASCII</option><option value="hex">HEX</option></select>
+          <button class="btn-primary" id="serialTxSendBtn">发送</button>
+        </div>
+      </div>
+
+      <div class="serial-panel">
+        <h4 style="margin-bottom:6px">常用指令</h4>
+        <div class="serial-row">
+          <select id="serialPresetSelect"><option value="">-- 选择指令 --</option></select>
+          <button class="btn-secondary" id="serialPresetSendBtn">发送选中</button>
+          <button class="btn-secondary" id="serialPresetDeleteBtn">删除选中</button>
+        </div>
+        <div class="serial-grid">
+          <div class="form-group"><label>名称</label><input type="text" id="serialPresetName" placeholder="例如: AT+RST" /></div>
+          <div class="form-group"><label>格式</label><select id="serialPresetFormat"><option value="ascii">ASCII</option><option value="hex">HEX</option></select></div>
+          <div class="form-group serial-wide"><label>指令内容</label><input type="text" id="serialPresetValue" placeholder="ASCII 文本或 HEX 字节" /></div>
+        </div>
+        <button class="btn-primary" id="serialPresetSaveBtn">保存为常用指令</button>
+      </div>
     </div>
   </div>
 

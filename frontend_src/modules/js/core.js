@@ -149,6 +149,29 @@ const el = {
   servoSpanUs: $('servoSpanUs'),
   configServoBtn: $('configServoBtn'),
   servoList: $('servoList'),
+  serialUartId: $('serialUartId'),
+  serialBaudrate: $('serialBaudrate'),
+  serialBits: $('serialBits'),
+  serialParity: $('serialParity'),
+  serialStop: $('serialStop'),
+  serialRxPin: $('serialRxPin'),
+  serialTxPin: $('serialTxPin'),
+  serialPinHint: $('serialPinHint'),
+  serialHexView: $('serialHexView'),
+  serialRefreshCfgBtn: $('serialRefreshCfgBtn'),
+  serialSaveCfgBtn: $('serialSaveCfgBtn'),
+  serialLog: $('serialLog'),
+  serialClearLogBtn: $('serialClearLogBtn'),
+  serialTxInput: $('serialTxInput'),
+  serialTxFormat: $('serialTxFormat'),
+  serialTxSendBtn: $('serialTxSendBtn'),
+  serialPresetSelect: $('serialPresetSelect'),
+  serialPresetName: $('serialPresetName'),
+  serialPresetValue: $('serialPresetValue'),
+  serialPresetFormat: $('serialPresetFormat'),
+  serialPresetSaveBtn: $('serialPresetSaveBtn'),
+  serialPresetDeleteBtn: $('serialPresetDeleteBtn'),
+  serialPresetSendBtn: $('serialPresetSendBtn'),
   codeRunSource: $('codeRunSource'),
   codeEditor: $('codeEditor'),
   codeLoadDraftBtn: $('codeLoadDraftBtn'),
@@ -305,16 +328,13 @@ function switchTab(tab) {
   // 切换到设备管理时刷新状态
   if (tab === 'device') {
     loadDeviceStatus();
-  }
-
-  if (tab === 'code') {
-    loadCodeDraft();
-    loadCodeConfig();
-    loadCodeHistoryList(true);
-    refreshCodeStatus();
-    startCodeStatusPolling();
+    if (typeof loadSerialAssistant === 'function') {
+      loadSerialAssistant(true);
+    }
   } else {
-    stopCodeStatusPolling();
+    if (typeof stopSerialPolling === 'function') {
+      stopSerialPolling();
+    }
   }
 }
 
@@ -360,6 +380,11 @@ function bindEvents() {
        el.deviceTabContents.forEach(content => {
          content.style.display = content.id === `device-tab-${tab}` ? 'block' : 'none';
        });
+      if (tab === 'serial') {
+        if (typeof loadSerialAssistant === 'function') loadSerialAssistant(false);
+      } else {
+        if (typeof stopSerialPolling === 'function') stopSerialPolling();
+      }
      });
    });
 
@@ -392,6 +417,30 @@ function bindEvents() {
    if (el.gpioList) {
      el.gpioList.addEventListener('click', onGpioCardAction);
    }
+    if (el.serialRefreshCfgBtn) el.serialRefreshCfgBtn.addEventListener('click', () => loadSerialAssistant(false));
+    if (el.serialSaveCfgBtn) el.serialSaveCfgBtn.addEventListener('click', saveSerialConfig);
+    if (el.serialTxSendBtn) el.serialTxSendBtn.addEventListener('click', sendSerialPayload);
+    if (el.serialClearLogBtn) el.serialClearLogBtn.addEventListener('click', clearSerialLog);
+    if (el.serialPresetSaveBtn) el.serialPresetSaveBtn.addEventListener('click', saveSerialPreset);
+    if (el.serialPresetDeleteBtn) el.serialPresetDeleteBtn.addEventListener('click', deleteSerialPreset);
+    if (el.serialPresetSendBtn) el.serialPresetSendBtn.addEventListener('click', sendSelectedSerialPreset);
+    if (el.serialPresetSelect) {
+      el.serialPresetSelect.addEventListener('change', onSerialPresetChange);
+    }
+    if (el.serialUartId) {
+      el.serialUartId.addEventListener('change', onSerialUartChanged);
+    }
+    if (el.serialRxPin) {
+      el.serialRxPin.addEventListener('change', onSerialUartChanged);
+    }
+    if (el.serialTxPin) {
+      el.serialTxPin.addEventListener('change', onSerialUartChanged);
+    }
+    if (el.serialHexView) {
+      el.serialHexView.addEventListener('change', () => {
+        if (typeof refreshSerialLogView === 'function') refreshSerialLogView();
+      });
+    }
    if (el.codeLoadDraftBtn) el.codeLoadDraftBtn.addEventListener('click', loadCodeDraft);
    if (el.codeLoadActiveBtn) el.codeLoadActiveBtn.addEventListener('click', loadCodeActive);
    if (el.codeSaveDraftBtn) el.codeSaveDraftBtn.addEventListener('click', saveCodeDraft);
