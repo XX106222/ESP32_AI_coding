@@ -18,11 +18,16 @@ from app_common import (
 )
 from app_code import boot_autorun_active_code, code_prepare_dirs, handle_code_api
 from app_agent import agent_prepare_dirs, handle_agent_api
+from app_analog import analog_prepare, handle_analog_api
 from app_serial import handle_serial_api, serial_prepare, serial_tick
 from app_device import (
     can_use_gpio,
+    gpio_reserved_text,
+    gpio_usage_text,
     init_board_led,
     is_valid_gpio,
+    register_gpio_usage,
+    release_gpio_usage,
     set_board_led,
     set_servo_angle_duty_u16,
     set_servo_pulse_us,
@@ -39,6 +44,89 @@ def _safe_int(value, default_value):
         return int(value)
     except Exception:
         return int(default_value)
+
+
+def _read_device_config():
+    data = read_json(st.DEVICE_CONFIG_FILE, {})
+    return data if isinstance(data, dict) else {}
+
+
+def _write_device_config(cfg):
+    atomic_write_json(st.DEVICE_CONFIG_FILE, cfg)
+
+
+def _persist_servos_to_device_config():
+    device_cfg = _read_device_config()
+    saved = []
+    for pin, servo in st.SERVOS.items():
+        saved.append({
+            "pin": int(pin),
+            "freq": int(servo.get("freq", 50)),
+            "min_us": int(servo.get("min_us", 1000)),
+            "max_us": int(servo.get("max_us", 2000)),
+            "angle": float(servo.get("angle", 90)),
+            "mode": str(servo.get("mode", "angle")),
+            "neutral_us": int(servo.get("neutral_us", 1500)),
+            "span_us": int(servo.get("span_us", 300)),
+            "speed": int(servo.get("speed", 0)),
+        })
+    device_cfg["servos"] = saved
+    _write_device_config(device_cfg)
+
+
+def _restore_servos_from_device_config():
+    if st.Pin is None or st.PWM is None:
+        return
+    items = _read_device_config().get("servos", [])
+    if not isinstance(items, list):
+        return
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            pin = int(item.get("pin"))
+            freq = int(item.get("freq", 50))
+            min_us = int(item.get("min_us", 1000))
+            max_us = int(item.get("max_us", 2000))
+            angle = max(0, min(180, float(item.get("angle", 90))))
+            mode = str(item.get("mode", "angle"))
+            neutral_us = int(item.get("neutral_us", 1500))
+            span_us = int(item.get("span_us", 300))
+            speed = max(-100, min(100, int(item.get("speed", 0))))
+
+            ok, _msg = can_use_gpio(pin)
+            if not ok:
+                continue
+            if mode not in ("angle", "continuous"):
+                continue
+            if min_us >= max_us or freq != 50 or min_us < 400 or max_us > 2600:
+                continue
+            if neutral_us < min_us or neutral_us > max_us or span_us < 20 or span_us > 700:
+                continue
+
+            pwm = st.PWM(st.Pin(pin))
+            pwm.freq(freq)
+            if mode == "continuous":
+                pulse_width = neutral_us + (span_us * speed / 100.0)
+                pulse_width = max(min_us, min(max_us, pulse_width))
+                set_servo_pulse_us(pwm, pulse_width, freq)
+            else:
+                set_servo_angle_duty_u16(pwm, angle)
+
+            st.SERVOS[pin] = {
+                "pwm": pwm,
+                "freq": freq,
+                "min_us": min_us,
+                "max_us": max_us,
+                "angle": angle,
+                "mode": mode,
+                "neutral_us": neutral_us,
+                "span_us": span_us,
+                "speed": speed,
+            }
+            register_gpio_usage(pin, "servo", "servo", "舵机")
+        except Exception:
+            continue
 
 
 def connect_wifi(ssid, password, timeout_sec=20):
@@ -71,6 +159,8 @@ def route_request(client, method, path, body, wlan):
         if handle_code_api(client, method, api_path, query_string, body):
             return
         if handle_agent_api(client, method, api_path, query_string, body):
+            return
+        if handle_analog_api(client, method, api_path, query_string, body):
             return
         if handle_serial_api(client, method, api_path, query_string, body):
             return
@@ -180,6 +270,8 @@ def route_request(client, method, path, body, wlan):
                     is_active = pin in st.ACTIVE_GPIO
                     status = "reserved" if is_reserved else ("active" if is_active else "available")
                     usage = st.ACTIVE_GPIO.get(pin, "")
+                    usage_text = gpio_usage_text(pin)
+                    reserved_text = gpio_reserved_text(pin) if is_reserved else ""
                     level = None
                     try:
                         if pin in st.GPIO_OUTPUTS:
@@ -192,6 +284,8 @@ def route_request(client, method, path, body, wlan):
                         "pin": pin,
                         "status": status,
                         "usage": usage,
+                        "usageText": usage_text,
+                        "reservedText": reserved_text,
                         "level": level,
                     }
                 send_json(client, 200, "OK", gpio_info)
@@ -217,7 +311,7 @@ def route_request(client, method, path, body, wlan):
                 if pin not in st.GPIO_OUTPUTS:
                     st.GPIO_OUTPUTS[pin] = st.Pin(pin, st.Pin.OUT)
                 st.GPIO_OUTPUTS[pin].value(val)
-                st.ACTIVE_GPIO[pin] = "gpio_out"
+                register_gpio_usage(pin, "gpio_out", "manual", "GPIO输出")
                 send_json(client, 200, "OK", {"pin": pin, "value": val})
             except Exception as e:
                 send_json(client, 500, "Internal Error", {"error": str(e)})
@@ -236,8 +330,9 @@ def route_request(client, method, path, body, wlan):
                 if pin in st.RESERVED_GPIO:
                     send_json(client, 409, "Conflict", {"error": "pin reserved"})
                     return
-                if st.ACTIVE_GPIO.get(pin) == "servo":
-                    send_json(client, 409, "Conflict", {"error": "pin is used by servo"})
+                usage = st.ACTIVE_GPIO.get(pin)
+                if usage and usage != "gpio_out":
+                    send_json(client, 409, "Conflict", {"error": "pin is used by %s" % usage})
                     return
                 if st.Pin is None:
                     send_json(client, 503, "Not Available", {"error": "GPIO not available"})
@@ -264,8 +359,9 @@ def route_request(client, method, path, body, wlan):
                 if pin in st.RESERVED_GPIO:
                     send_json(client, 409, "Conflict", {"error": "pin reserved"})
                     return
-                if st.ACTIVE_GPIO.get(pin) == "servo":
-                    send_json(client, 409, "Conflict", {"error": "pin is used by servo"})
+                usage = st.ACTIVE_GPIO.get(pin)
+                if usage and usage != "gpio_out":
+                    send_json(client, 409, "Conflict", {"error": "pin is used by %s" % usage})
                     return
                 out_pin = st.GPIO_OUTPUTS.pop(pin, None)
                 if out_pin is not None:
@@ -273,7 +369,7 @@ def route_request(client, method, path, body, wlan):
                         st.Pin(pin, st.Pin.IN)
                     except Exception:
                         pass
-                st.ACTIVE_GPIO.pop(pin, None)
+                release_gpio_usage(pin, "gpio_out")
                 send_json(client, 200, "OK", {"pin": pin, "released": True})
             except Exception as e:
                 send_json(client, 500, "Internal Error", {"error": str(e)})
@@ -357,7 +453,8 @@ def route_request(client, method, path, body, wlan):
                             "span_us": span_us,
                             "speed": 0,
                         }
-                        st.ACTIVE_GPIO[pin] = "servo"
+                        register_gpio_usage(pin, "servo", "servo", "舵机")
+                        _persist_servos_to_device_config()
                         send_json(client, 200, "OK", {"pin": pin, "configured": True})
                     except Exception as e:
                         send_json(client, 500, "PWM Error", {"error": str(e)})
@@ -385,6 +482,7 @@ def route_request(client, method, path, body, wlan):
                 angle = max(0, min(180, angle))
                 set_servo_angle_duty_u16(servo["pwm"], angle)
                 servo["angle"] = angle
+                _persist_servos_to_device_config()
                 send_json(client, 200, "OK", {"pin": pin, "angle": angle})
             except Exception as e:
                 send_json(client, 500, "Internal Error", {"error": str(e)})
@@ -412,6 +510,7 @@ def route_request(client, method, path, body, wlan):
                 pulse_width = max(servo["min_us"], min(servo["max_us"], pulse_width))
                 set_servo_pulse_us(servo["pwm"], pulse_width, servo["freq"])
                 servo["speed"] = speed
+                _persist_servos_to_device_config()
                 send_json(client, 200, "OK", {"pin": pin, "speed": speed})
             except Exception as e:
                 send_json(client, 500, "Internal Error", {"error": str(e)})
@@ -438,7 +537,8 @@ def route_request(client, method, path, body, wlan):
                         st.Pin(pin, st.Pin.IN)
                 except Exception:
                     pass
-                st.ACTIVE_GPIO.pop(pin, None)
+                release_gpio_usage(pin, "servo")
+                _persist_servos_to_device_config()
                 send_json(client, 200, "OK", {"pin": pin, "deleted": True})
             except Exception as e:
                 send_json(client, 500, "Internal Error", {"error": str(e)})
@@ -500,6 +600,7 @@ def main():
     ensure_dir(st.DATA_DIR)
     code_prepare_dirs()
     agent_prepare_dirs()
+    analog_prepare()
     serial_prepare()
 
     if read_json(st.CONFIG_FILE, None) is None:
@@ -508,6 +609,7 @@ def main():
         atomic_write_json(st.CONVERSATIONS_FILE, [])
 
     init_board_led()
+    _restore_servos_from_device_config()
 
     wlan, ip = connect_wifi(WIFI_SSID, WIFI_PASSWORD)
     print("[READY] 浏览器打开: http://%s" % ip)

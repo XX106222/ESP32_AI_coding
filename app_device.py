@@ -6,6 +6,56 @@ def is_valid_gpio(pin):
     return pin in st.GPIO_PINS
 
 
+GPIO_USAGE_LABELS = {
+    "board_led": "板载LED",
+    "gpio_out": "GPIO输出",
+    "servo": "舵机",
+    "serial_rx": "串口RX",
+    "serial_tx": "串口TX",
+    "adc_in": "ADC",
+    "pwm_out": "PWM",
+}
+
+
+def register_gpio_usage(pin, usage, owner="", label=""):
+    pin = int(pin)
+    usage = str(usage or "")
+    rec = {
+        "usage": usage,
+        "owner": str(owner or ""),
+        "label": str(label or ""),
+        "updatedMs": int(ticks_ms()),
+    }
+    st.GPIO_REGISTRY[pin] = rec
+    st.ACTIVE_GPIO[pin] = usage
+    return rec
+
+
+def release_gpio_usage(pin, expected_usage=None):
+    pin = int(pin)
+    usage = st.ACTIVE_GPIO.get(pin)
+    if expected_usage and usage != expected_usage:
+        return False
+    st.ACTIVE_GPIO.pop(pin, None)
+    st.GPIO_REGISTRY.pop(pin, None)
+    return True
+
+
+def gpio_usage_text(pin):
+    rec = st.GPIO_REGISTRY.get(pin, {}) if isinstance(st.GPIO_REGISTRY, dict) else {}
+    usage = str(rec.get("usage") or st.ACTIVE_GPIO.get(pin) or "").strip()
+    if not usage:
+        return ""
+    label = str(rec.get("label") or "").strip()
+    if label:
+        return label
+    return GPIO_USAGE_LABELS.get(usage, usage)
+
+
+def gpio_reserved_text(pin):
+    return str(getattr(st, "RESERVED_GPIO_LABELS", {}).get(pin, "系统保留")).strip() or "系统保留"
+
+
 def can_use_gpio(pin, required_usage=None):
     if not is_valid_gpio(pin):
         return False, "invalid gpio"
@@ -42,13 +92,13 @@ def init_board_led():
         return
     try:
         st.BOARD_LED = st.neopixel.NeoPixel(st.Pin(st.BOARD_LED_PIN, st.Pin.OUT), 1)
-        st.BOARD_LED[0] = (0, 0, 0)
+        st.BOARD_LED[0] = (0, 0, 0)  # type: ignore[assignment]
         st.BOARD_LED.write()
         st.BOARD_LED_STATE["on"] = False
         st.BOARD_LED_STATE["r"] = 0
         st.BOARD_LED_STATE["g"] = 0
         st.BOARD_LED_STATE["b"] = 0
-        st.ACTIVE_GPIO[st.BOARD_LED_PIN] = "board_led"
+        register_gpio_usage(st.BOARD_LED_PIN, "board_led", "system", "板载LED")
     except Exception:
         st.BOARD_LED = None
 
@@ -60,10 +110,10 @@ def set_board_led(r, g, b, on=True):
     g = max(0, min(255, int(g)))
     b = max(0, min(255, int(b)))
     if on:
-        st.BOARD_LED[0] = (r, g, b)
+        st.BOARD_LED[0] = (r, g, b)  # type: ignore[assignment]
         st.BOARD_LED_STATE["on"] = True
     else:
-        st.BOARD_LED[0] = (0, 0, 0)
+        st.BOARD_LED[0] = (0, 0, 0)  # type: ignore[assignment]
         st.BOARD_LED_STATE["on"] = False
     st.BOARD_LED.write()
     st.BOARD_LED_STATE["r"] = r
@@ -78,7 +128,7 @@ def write_board_led_raw(r, g, b):
     rr = max(0, min(255, int(r)))
     gg = max(0, min(255, int(g)))
     bb = max(0, min(255, int(b)))
-    st.BOARD_LED[0] = (rr, gg, bb)
+    st.BOARD_LED[0] = (rr, gg, bb)  # type: ignore[assignment]
     st.BOARD_LED.write()
 
 
@@ -142,6 +192,7 @@ def device_state_snapshot():
         "board_led": st.BOARD_LED_STATE,
         "active_gpio": st.ACTIVE_GPIO,
         "servos": {},
+        "analog": {},
     }
     for pin in st.SERVOS:
         servo = st.SERVOS[pin]
@@ -149,6 +200,11 @@ def device_state_snapshot():
             "mode": servo.get("mode", "angle"),
             "angle": servo.get("angle", 0),
             "speed": servo.get("speed", 0),
+        }
+    if hasattr(st, "ANALOG_CONFIG"):
+        state["analog"] = {
+            "adc": getattr(st, "ANALOG_CONFIG", {}).get("adc", {}),
+            "pwm": getattr(st, "ANALOG_CONFIG", {}).get("pwm", {}),
         }
     return state
 
@@ -164,7 +220,7 @@ def code_gpio_write(pin, value):
     if pin not in st.GPIO_OUTPUTS:
         st.GPIO_OUTPUTS[pin] = st.Pin(pin, st.Pin.OUT)
     st.GPIO_OUTPUTS[pin].value(val)
-    st.ACTIVE_GPIO[pin] = "gpio_out"
+    register_gpio_usage(pin, "gpio_out", "manual", "GPIO输出")
     return val
 
 
@@ -174,8 +230,9 @@ def code_gpio_read(pin):
         raise RuntimeError("invalid gpio")
     if pin in st.RESERVED_GPIO:
         raise RuntimeError("pin reserved")
-    if st.ACTIVE_GPIO.get(pin) == "servo":
-        raise RuntimeError("pin used by servo")
+    usage = st.ACTIVE_GPIO.get(pin)
+    if usage and usage != "gpio_out":
+        raise RuntimeError("pin used by %s" % usage)
     if st.Pin is None:
         raise RuntimeError("GPIO unavailable")
     if pin in st.GPIO_OUTPUTS:
@@ -189,10 +246,11 @@ def code_gpio_release(pin):
         raise RuntimeError("invalid gpio")
     if pin in st.RESERVED_GPIO:
         raise RuntimeError("pin reserved")
-    if st.ACTIVE_GPIO.get(pin) == "servo":
-        raise RuntimeError("pin used by servo")
+    usage = st.ACTIVE_GPIO.get(pin)
+    if usage and usage != "gpio_out":
+        raise RuntimeError("pin used by %s" % usage)
     st.GPIO_OUTPUTS.pop(pin, None)
-    st.ACTIVE_GPIO.pop(pin, None)
+    release_gpio_usage(pin, "gpio_out")
     if st.Pin:
         try:
             st.Pin(pin, st.Pin.IN)

@@ -10,6 +10,10 @@ var serialSchemaCache = null;
 var serialPresetsCache = [];
 var serialAppliedPins = { rx: null, tx: null };
 var serialSafePins = [];
+var analogPollTimer = null;
+var analogActiveTab = '';
+var analogSchemaCache = null;
+var analogSafePins = { adc: [], pwm: [] };
 
 function sleepMs(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -305,7 +309,8 @@ function renderGpioList(gpioStatus) {
       <div class="gpio-pin">GPIO ${gpio.pin}</div>
       <div class="gpio-status ${gpio.status}">${statusText}</div>
       <div style="font-size:0.7rem;color:var(--text3);margin-top:2px">电平: ${gpio.level ?? '—'}</div>
-      ${gpio.usage ? `<div style="font-size:0.7rem;color:var(--text3);margin-top:2px">用途: ${gpio.usage}</div>` : ''}
+      ${gpio.status === 'reserved' ? `<div style="font-size:0.7rem;color:var(--text3);margin-top:2px">保留: ${gpio.reservedText || '系统保留'}</div>` : ''}
+      ${gpio.usage ? `<div style="font-size:0.7rem;color:var(--text3);margin-top:2px">用途: ${gpio.usageText || gpio.usage}</div>` : ''}
       <div class="gpio-card-actions">
         <button class="gpio-mini-btn" data-action="high" data-pin="${gpio.pin}" ${gpio.status !== 'available' && gpio.usage !== 'gpio_out' ? 'disabled' : ''}>高</button>
         <button class="gpio-mini-btn" data-action="low" data-pin="${gpio.pin}" ${gpio.status !== 'available' && gpio.usage !== 'gpio_out' ? 'disabled' : ''}>低</button>
@@ -995,28 +1000,20 @@ function renderSerialPresetOptions(presets) {
 
 function updateSerialPinHint() {
   if (!el.serialPinHint) return;
-  const uartId = Number.parseInt(el.serialUartId?.value || '', 10);
-  const selRx = Number.parseInt(el.serialRxPin?.value || '', 10);
-  const selTx = Number.parseInt(el.serialTxPin?.value || '', 10);
-  let mapped = '';
-  if (serialSchemaCache?.uartOptions && Number.isInteger(uartId)) {
-    const m = serialSchemaCache.uartOptions.find(x => Number(x.uartId) === uartId);
-    if (m) mapped = `UART${uartId} 接线: RX GPIO${m.rx} / TX GPIO${m.tx}`;
-  }
+  const statusState = String(el.serialPinHint.dataset.state || (el.serialEnabled?.checked === false ? 'closed' : 'opened'));
+  const statusMap = { opened: '已启用', closed: '已关闭', error: '配置错误' };
+  const applied = String(el.serialPinHint.dataset.applied || '').trim();
+  el.serialPinHint.textContent = [`状态: ${statusMap[statusState] || statusState}`, applied ? `当前应用: ${applied}` : '当前应用: —'].join(' | ');
 
-  let selected = '';
-  if (Number.isInteger(selRx) && Number.isInteger(selTx)) {
-    selected = `已选择: RX GPIO${selRx} / TX GPIO${selTx}`;
+  if (el.serialUartWarn) {
+    const uartId = Number.parseInt(el.serialUartId?.value || '', 10);
+    let warn = '';
+    if (Number.isInteger(uartId) && Array.isArray(serialSchemaCache?.uartOptions)) {
+      const info = serialSchemaCache.uartOptions.find(x => Number(x.uartId) === uartId);
+      warn = String(info?.warning || '').trim();
+    }
+    el.serialUartWarn.textContent = warn || ' '; // keep row height stable
   }
-
-  let applied = '';
-  const rx = Number(serialAppliedPins?.rx);
-  const tx = Number(serialAppliedPins?.tx);
-  if (Number.isInteger(rx) && Number.isInteger(tx)) {
-    applied = `当前应用: RX GPIO${rx} / TX GPIO${tx}`;
-  }
-
-  el.serialPinHint.textContent = [mapped, selected, applied].filter(Boolean).join(' | ') || '—';
 }
 
 function renderSerialPinSelects() {
@@ -1043,6 +1040,7 @@ function renderSerialPinSelects() {
 
 function fillSerialConfigForm(payload) {
   const cfg = payload?.config || {};
+  if (el.serialEnabled) el.serialEnabled.checked = cfg.enabled !== false;
   if (el.serialUartId) el.serialUartId.value = String(cfg.uartId ?? 1);
   if (el.serialBaudrate) el.serialBaudrate.value = String(cfg.baudrate ?? 115200);
   if (el.serialBits) el.serialBits.value = String(cfg.bits ?? 8);
@@ -1054,9 +1052,18 @@ function fillSerialConfigForm(payload) {
     rx: payload?.pins?.rx ?? cfg.rx ?? null,
     tx: payload?.pins?.tx ?? cfg.tx ?? null,
   };
+  if (el.serialPinHint) {
+    el.serialPinHint.dataset.state = String(payload?.status?.state || 'closed');
+    el.serialPinHint.dataset.applied = String(payload?.status?.applied || '');
+  }
   renderSerialPinSelects();
   if (el.serialRxPin && serialAppliedPins.rx != null) el.serialRxPin.value = String(serialAppliedPins.rx);
   if (el.serialTxPin && serialAppliedPins.tx != null) el.serialTxPin.value = String(serialAppliedPins.tx);
+
+  const enabled = el.serialEnabled?.checked !== false;
+  [el.serialUartId, el.serialBaudrate, el.serialBits, el.serialParity, el.serialStop, el.serialRxPin, el.serialTxPin, el.serialTxInput, el.serialTxFormat, el.serialTxSendBtn, el.serialPresetSelect, el.serialPresetSendBtn, el.serialPresetSaveBtn, el.serialPresetDeleteBtn].forEach(node => {
+    if (node) node.disabled = !enabled;
+  });
   updateSerialPinHint();
 }
 
@@ -1066,6 +1073,7 @@ function readSerialConfigForm() {
     return Number.isNaN(n) ? fallback : n;
   };
   return {
+    enabled: el.serialEnabled?.checked !== false,
     uartId: parseNum(el.serialUartId?.value, 1),
     baudrate: parseNum(el.serialBaudrate?.value, 115200),
     bits: parseNum(el.serialBits?.value, 8),
@@ -1086,6 +1094,10 @@ function onSerialUartChanged() {
       if (el.serialTxPin && serialSafePins.includes(Number(info.tx))) el.serialTxPin.value = String(info.tx);
     }
   }
+  updateSerialPinHint();
+}
+
+function onSerialPinsChanged() {
   updateSerialPinHint();
 }
 
@@ -1178,6 +1190,17 @@ async function saveSerialConfig() {
     showToast('串口配置已保存并应用');
   } catch (e) {
     showToast('保存串口配置失败: ' + e.message);
+  }
+}
+
+async function resetSerialPinsToDefault() {
+  try {
+    const uartId = Number.parseInt(el.serialUartId?.value || '1', 10);
+    const ret = await apiPost('/device/serial/reset-pins', { uartId });
+    fillSerialConfigForm(ret);
+    showToast(`UART${uartId} 已恢复默认 IO`);
+  } catch (e) {
+    showToast('恢复默认 IO 失败: ' + e.message);
   }
 }
 
@@ -1298,3 +1321,241 @@ window.clearSerialLog = clearSerialLog;
 window.refreshSerialLogView = refreshSerialLogView;
 window.onSerialPresetChange = onSerialPresetChange;
 window.onSerialUartChanged = onSerialUartChanged;
+
+function getActiveDeviceTabName() {
+  const btn = Array.from(el.deviceTabs || []).find(b => b.classList.contains('active'));
+  return btn?.dataset?.deviceTab || '';
+}
+
+function stopAnalogPolling() {
+  if (analogPollTimer) {
+    clearInterval(analogPollTimer);
+    analogPollTimer = null;
+  }
+}
+
+function startAnalogPolling(tabName) {
+  stopAnalogPolling();
+  if (String(tabName || analogActiveTab || '').toLowerCase() !== 'adc') return;
+  analogPollTimer = setInterval(() => {
+    readAnalogAdc(true);
+  }, 500);
+}
+
+function renderAnalogPinOptions(node, pins, selected) {
+  if (!node) return;
+  const current = Number.parseInt(String(selected ?? node.value ?? ''), 10);
+  node.innerHTML = '';
+  const list = Array.isArray(pins) ? pins : [];
+  list.forEach(pin => {
+    const opt = document.createElement('option');
+    opt.value = String(pin);
+    opt.textContent = `GPIO ${pin}`;
+    node.appendChild(opt);
+  });
+  if (Number.isInteger(current) && list.includes(current)) {
+    node.value = String(current);
+  } else if (list.length > 0) {
+    node.value = String(list[0]);
+  }
+}
+
+function updateAnalogHint(tabName) {
+  const tab = String(tabName || analogActiveTab || '').toLowerCase();
+  if (tab === 'adc') {
+    if (!el.adcMeta) return;
+    if (el.adcEnabled && !el.adcEnabled.checked) {
+      el.adcMeta.textContent = 'ADC 已关闭';
+      return;
+    }
+    const pin = el.adcPin?.value || '—';
+    const atten = el.adcAtten?.value || '11db';
+    el.adcMeta.textContent = `ADC 引脚 GPIO${pin} · 衰减 ${atten}`;
+    return;
+  }
+  if (tab === 'pwm') {
+    if (!el.pwmMeta) return;
+    if (el.pwmEnabled && !el.pwmEnabled.checked) {
+      el.pwmMeta.textContent = 'PWM 已关闭';
+      if (el.pwmValue) el.pwmValue.textContent = '0%';
+      return;
+    }
+    const pin = el.pwmPin?.value || '—';
+    const freq = el.pwmFreq?.value || '1000';
+    const duty = el.pwmDuty?.value || '0';
+    el.pwmMeta.textContent = `PWM 引脚 GPIO${pin} · ${freq}Hz · ${duty}%`;
+    if (el.pwmValue) el.pwmValue.textContent = `${duty}%`;
+    return;
+  }
+}
+
+function renderAnalogSchema(schema) {
+  const adcPins = Array.isArray(schema?.adc?.safePins) ? schema.adc.safePins.map(x => Number(x)).filter(Number.isInteger) : [];
+  const pwmPins = Array.isArray(schema?.pwm?.safePins) ? schema.pwm.safePins.map(x => Number(x)).filter(Number.isInteger) : [];
+  analogSafePins = { adc: adcPins, pwm: pwmPins };
+  renderAnalogPinOptions(el.adcPin, adcPins, el.adcPin?.value);
+  renderAnalogPinOptions(el.pwmPin, pwmPins, el.pwmPin?.value);
+}
+
+function renderAnalogConfig(payload) {
+  const cfg = payload?.config || {};
+  const adc = cfg.adc || {};
+  const pwm = cfg.pwm || {};
+
+  if (el.adcPin && adc.pin != null && !analogSafePins.adc.includes(Number(adc.pin))) {
+    const opt = document.createElement('option');
+    opt.value = String(adc.pin);
+    opt.textContent = `GPIO ${adc.pin} (已保存)`;
+    el.adcPin.appendChild(opt);
+  }
+  if (el.pwmPin && pwm.pin != null && !analogSafePins.pwm.includes(Number(pwm.pin))) {
+    const opt = document.createElement('option');
+    opt.value = String(pwm.pin);
+    opt.textContent = `GPIO ${pwm.pin} (已保存)`;
+    el.pwmPin.appendChild(opt);
+  }
+
+  if (el.adcPin) el.adcPin.value = adc.pin != null ? String(adc.pin) : (analogSafePins.adc[0] != null ? String(analogSafePins.adc[0]) : '');
+  if (el.adcEnabled) el.adcEnabled.checked = adc.enabled !== false;
+  if (el.adcAtten) el.adcAtten.value = adc.atten || '11db';
+
+  if (el.pwmPin) el.pwmPin.value = pwm.pin != null ? String(pwm.pin) : (analogSafePins.pwm[0] != null ? String(analogSafePins.pwm[0]) : '');
+  if (el.pwmEnabled) el.pwmEnabled.checked = pwm.enabled === true;
+  if (el.pwmFreq) el.pwmFreq.value = String(pwm.freq ?? 1000);
+  if (el.pwmDuty) el.pwmDuty.value = String(pwm.duty ?? 0);
+  if (el.pwmValue) el.pwmValue.textContent = `${pwm.duty ?? 0}%`;
+
+  const adcEnabled = el.adcEnabled?.checked !== false;
+  [el.adcPin, el.adcAtten, el.adcReadBtn].forEach(node => { if (node) node.disabled = !adcEnabled; });
+  const pwmEnabled = el.pwmEnabled?.checked === true;
+  [el.pwmPin, el.pwmFreq, el.pwmDuty, el.pwmApplyBtn].forEach(node => { if (node) node.disabled = !pwmEnabled; });
+
+  updateAnalogHint('adc');
+  updateAnalogHint('pwm');
+}
+
+async function loadAnalogSchema() {
+  const schema = await apiGet('/device/analog/schema');
+  analogSchemaCache = schema || {};
+  renderAnalogSchema(analogSchemaCache);
+  return analogSchemaCache;
+}
+
+async function loadAnalogConfig() {
+  const payload = await apiGet('/device/analog/config');
+  renderAnalogConfig(payload || {});
+  return payload || {};
+}
+
+async function loadAnalogAssistant(silent = false, tabName = '') {
+  try {
+    analogActiveTab = String(tabName || getActiveDeviceTabName() || analogActiveTab || '').toLowerCase();
+    await loadAnalogSchema();
+    const payload = await loadAnalogConfig();
+    if (analogActiveTab === 'adc') {
+      startAnalogPolling('adc');
+      await readAnalogAdc(true);
+    } else {
+      stopAnalogPolling();
+    }
+    if (!silent) showToast('模拟设备面板已加载');
+    return payload;
+  } catch (e) {
+    stopAnalogPolling();
+    if (!silent) showToast('加载模拟设备失败: ' + e.message);
+    return null;
+  }
+}
+
+async function readAnalogAdc(silent = false) {
+  try {
+    if (el.adcEnabled && !el.adcEnabled.checked) {
+      if (!silent) showToast('ADC 已关闭');
+      return null;
+    }
+    const pin = el.adcPin?.value;
+    const atten = el.adcAtten?.value || '11db';
+    if (!pin) {
+      if (!silent) showToast('请选择 ADC 引脚');
+      return null;
+    }
+    const res = await apiPost('/device/analog/adc/read', { pin: parseInt(pin), atten });
+    if (el.adcValue) {
+      el.adcValue.textContent = `${res.raw ?? '—'} / ${res.voltage ?? '—'}V`;
+    }
+    if (el.adcMeta) {
+      el.adcMeta.textContent = `GPIO${res.pin} · ${atten}`;
+    }
+    return res;
+  } catch (e) {
+    if (!silent) showToast('ADC 读取失败: ' + e.message);
+    return null;
+  }
+}
+
+async function applyAnalogPwm() {
+  try {
+    const enabled = el.pwmEnabled?.checked === true;
+    if (!enabled) {
+      await stopAnalogPwm();
+      return;
+    }
+    const pin = el.pwmPin?.value;
+    if (!pin) {
+      showToast('请选择 PWM 引脚');
+      return;
+    }
+    const payload = {
+      pin: parseInt(pin),
+      freq: parseInt(el.pwmFreq?.value || '1000', 10),
+      duty: parseInt(el.pwmDuty?.value || '0', 10),
+      enabled: enabled,
+    };
+    const res = await apiPost('/device/analog/pwm/apply', payload);
+    renderAnalogConfig(res || {});
+    showToast(`PWM 已应用: GPIO ${pin}`);
+  } catch (e) {
+    showToast('PWM 应用失败: ' + e.message);
+  }
+}
+
+async function stopAnalogPwm() {
+  try {
+    if (el.pwmEnabled) el.pwmEnabled.checked = false;
+    const res = await apiPost('/device/analog/pwm/stop', {});
+    renderAnalogConfig(res || {});
+    showToast('PWM 已停止');
+  } catch (e) {
+    showToast('PWM 停止失败: ' + e.message);
+  }
+}
+
+async function applyAnalogAdcConfig() {
+  try {
+    const payload = {
+      adc: {
+        enabled: el.adcEnabled?.checked !== false,
+        pin: parseInt(el.adcPin?.value || '0', 10),
+        atten: String(el.adcAtten?.value || '11db'),
+      },
+    };
+    const res = await apiPost('/device/analog/config', payload);
+    renderAnalogConfig(res || {});
+    showToast(payload.adc.enabled ? 'ADC 已启用' : 'ADC 已关闭');
+    if (payload.adc.enabled) {
+      await readAnalogAdc(true);
+    }
+  } catch (e) {
+    showToast('保存 ADC 配置失败: ' + e.message);
+  }
+}
+
+window.loadAnalogAssistant = loadAnalogAssistant;
+window.stopAnalogPolling = stopAnalogPolling;
+window.readAnalogAdc = readAnalogAdc;
+window.applyAnalogPwm = applyAnalogPwm;
+window.stopAnalogPwm = stopAnalogPwm;
+window.applyAnalogAdcConfig = applyAnalogAdcConfig;
+window.updateAnalogHint = updateAnalogHint;
+window.resetSerialPinsToDefault = resetSerialPinsToDefault;
+

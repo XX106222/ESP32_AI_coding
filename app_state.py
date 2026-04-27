@@ -9,9 +9,14 @@ except ImportError:
     network = None
 
 try:
-    from machine import Pin, PWM, UART
-except ImportError:
-    Pin, PWM, UART = None, None, None
+    import machine
+except Exception:
+    machine = None
+
+Pin = getattr(machine, "Pin", None) if machine is not None else None
+PWM = getattr(machine, "PWM", None) if machine is not None else None
+UART = getattr(machine, "UART", None) if machine is not None else None
+ADC = getattr(machine, "ADC", None) if machine is not None else None
 
 try:
     import neopixel
@@ -48,8 +53,15 @@ RESERVED_GPIO = {
     0, 1, 3,
 }
 
+RESERVED_GPIO_LABELS = {
+    0: "BOOT",
+    1: "UART0_TX",
+    3: "UART0_RX",
+}
+
 SERVOS = {}
 ACTIVE_GPIO = {}
+GPIO_REGISTRY = {}
 GPIO_OUTPUTS = {}
 GPIO_PINS = tuple(range(49))
 BOARD_LED_PIN = 48
@@ -211,6 +223,7 @@ SERIAL_RX_BUFFER_EVENTS = 300
 SERIAL_RX_CHUNK_BYTES = 256
 
 DEFAULT_SERIAL_CONFIG = {
+    "enabled": True,
     "uartId": 1,
     "baudrate": SERIAL_BAUDRATE,
     "bits": 8,
@@ -234,3 +247,28 @@ SERIAL_RUNTIME = {
     "events": [],
     "pins": {"rx": None, "tx": None},
 }
+
+DEFAULT_ANALOG_CONFIG = {
+    "adc": {
+        "pin": None,
+        "atten": "11db",
+        "enabled": True,
+    },
+    "pwm": {
+        "pin": None,
+        "freq": 1000,
+        "duty": 0,
+        "enabled": False,
+    },
+}
+
+ANALOG_CONFIG = {
+    "adc": dict(DEFAULT_ANALOG_CONFIG["adc"]),
+    "pwm": dict(DEFAULT_ANALOG_CONFIG["pwm"]),
+}
+
+ANALOG_RUNTIME = {
+    "adc": {"pin": None, "atten": "11db", "enabled": True, "lastValue": None, "lastRaw": None, "lastAt": 0},
+    "pwm": {"pwm": None, "pin": None, "lastError": ""},
+}
+

@@ -130,6 +130,8 @@
       <button class="device-tab-btn" data-device-tab="led" title="板载LED">💡 板载LED</button>
       <button class="device-tab-btn" data-device-tab="servo" title="舵机控制">🎚️ 舵机</button>
       <button class="device-tab-btn" data-device-tab="serial" title="串口助手">🧰 串口</button>
+      <button class="device-tab-btn" data-device-tab="adc" title="ADC 读取">📈 ADC</button>
+      <button class="device-tab-btn" data-device-tab="pwm" title="PWM 输出">🎛️ PWM</button>
     </div>
 
     <div class="device-tab-content" id="device-tab-system" style="display:block">
@@ -212,7 +214,9 @@
       <h4>串口助手</h4>
       <div class="serial-panel">
         <div class="serial-grid">
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="serialEnabled" /><span>启用串口</span></label></div>
           <div class="form-group"><label>串口号</label><select id="serialUartId"></select></div>
+            <div class="form-group serial-wide"><span class="serial-warn" id="serialUartWarn">—</span></div>
           <div class="form-group"><label>波特率</label><select id="serialBaudrate"><option value="9600">9600</option><option value="19200">19200</option><option value="38400">38400</option><option value="57600">57600</option><option value="115200">115200</option><option value="230400">230400</option><option value="460800">460800</option><option value="921600">921600</option></select></div>
           <div class="form-group"><label>数据位</label><select id="serialBits"><option value="8">8</option><option value="7">7</option><option value="6">6</option><option value="5">5</option></select></div>
           <div class="form-group"><label>校验位</label><select id="serialParity"><option value="N">无</option><option value="E">偶校验</option><option value="O">奇校验</option></select></div>
@@ -223,6 +227,7 @@
         <div class="serial-row">
           <span class="system-value" id="serialPinHint">—</span>
           <label class="checkbox-label"><input type="checkbox" id="serialHexView" /><span>HEX 显示</span></label>
+            <button class="btn-secondary" id="serialResetPinsBtn">恢复默认IO</button>
           <button class="btn-secondary" id="serialRefreshCfgBtn">刷新</button>
           <button class="btn-primary" id="serialSaveCfgBtn">保存并应用</button>
         </div>
@@ -262,6 +267,48 @@
         <button class="btn-primary" id="serialPresetSaveBtn">保存为常用指令</button>
       </div>
     </div>
+
+    <div class="device-tab-content" id="device-tab-adc" style="display:none">
+      <h4>ADC 读取</h4>
+      <div class="serial-panel">
+        <div class="serial-grid">
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="adcEnabled" /><span>启用 ADC</span></label></div>
+          <div class="form-group"><label>ADC 引脚</label><select id="adcPin"></select></div>
+          <div class="form-group"><label>衰减</label><select id="adcAtten"><option value="0db">0 dB</option><option value="2.5db">2.5 dB</option><option value="6db">6 dB</option><option value="11db">11 dB</option></select></div>
+        </div>
+        <div class="serial-row">
+          <button class="btn-secondary" id="adcRefreshCfgBtn">刷新</button>
+          <button class="btn-primary" id="adcSaveCfgBtn">保存配置</button>
+          <button class="btn-primary" id="adcReadBtn">读取</button>
+        </div>
+        <div class="analog-read-box">
+          <div class="analog-read-value" id="adcValue">—</div>
+          <div class="analog-read-meta" id="adcMeta">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="device-tab-content" id="device-tab-pwm" style="display:none">
+      <h4>PWM 输出</h4>
+      <div class="serial-panel">
+        <div class="serial-grid">
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="pwmEnabled" /><span>启用 PWM</span></label></div>
+          <div class="form-group"><label>PWM 引脚</label><select id="pwmPin"></select></div>
+          <div class="form-group"><label>频率 (Hz)</label><select id="pwmFreq"><option value="100">100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option><option value="2000">2000</option><option value="5000">5000</option><option value="10000">10000</option><option value="20000">20000</option></select></div>
+        </div>
+        <div class="pwm-duty-row"><label for="pwmDuty">占空比</label><input type="range" id="pwmDuty" min="0" max="100" value="0" /></div>
+        <div class="serial-row">
+          <button class="btn-secondary" id="pwmRefreshCfgBtn">刷新</button>
+          <button class="btn-primary" id="pwmApplyBtn">应用</button>
+          <button class="btn-secondary" id="pwmStopBtn">停止</button>
+        </div>
+        <div class="analog-read-box">
+          <div class="analog-read-value" id="pwmValue">0%</div>
+          <div class="analog-read-meta" id="pwmMeta">—</div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <div class="panel" id="panel-code" style="display:none">

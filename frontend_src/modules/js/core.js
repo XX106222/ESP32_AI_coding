@@ -150,6 +150,7 @@ const el = {
   configServoBtn: $('configServoBtn'),
   servoList: $('servoList'),
   serialUartId: $('serialUartId'),
+  serialEnabled: $('serialEnabled'),
   serialBaudrate: $('serialBaudrate'),
   serialBits: $('serialBits'),
   serialParity: $('serialParity'),
@@ -157,7 +158,9 @@ const el = {
   serialRxPin: $('serialRxPin'),
   serialTxPin: $('serialTxPin'),
   serialPinHint: $('serialPinHint'),
+  serialUartWarn: $('serialUartWarn'),
   serialHexView: $('serialHexView'),
+  serialResetPinsBtn: $('serialResetPinsBtn'),
   serialRefreshCfgBtn: $('serialRefreshCfgBtn'),
   serialSaveCfgBtn: $('serialSaveCfgBtn'),
   serialLog: $('serialLog'),
@@ -172,6 +175,23 @@ const el = {
   serialPresetSaveBtn: $('serialPresetSaveBtn'),
   serialPresetDeleteBtn: $('serialPresetDeleteBtn'),
   serialPresetSendBtn: $('serialPresetSendBtn'),
+  adcPin: $('adcPin'),
+  adcEnabled: $('adcEnabled'),
+  adcAtten: $('adcAtten'),
+  adcRefreshCfgBtn: $('adcRefreshCfgBtn'),
+  adcSaveCfgBtn: $('adcSaveCfgBtn'),
+  adcReadBtn: $('adcReadBtn'),
+  adcValue: $('adcValue'),
+  adcMeta: $('adcMeta'),
+  pwmPin: $('pwmPin'),
+  pwmEnabled: $('pwmEnabled'),
+  pwmFreq: $('pwmFreq'),
+  pwmDuty: $('pwmDuty'),
+  pwmRefreshCfgBtn: $('pwmRefreshCfgBtn'),
+  pwmApplyBtn: $('pwmApplyBtn'),
+  pwmStopBtn: $('pwmStopBtn'),
+  pwmValue: $('pwmValue'),
+  pwmMeta: $('pwmMeta'),
   codeRunSource: $('codeRunSource'),
   codeEditor: $('codeEditor'),
   codeLoadDraftBtn: $('codeLoadDraftBtn'),
@@ -331,9 +351,15 @@ function switchTab(tab) {
     if (typeof loadSerialAssistant === 'function') {
       loadSerialAssistant(true);
     }
+    if (typeof loadAnalogAssistant === 'function') {
+      loadAnalogAssistant(true);
+    }
   } else {
     if (typeof stopSerialPolling === 'function') {
       stopSerialPolling();
+    }
+    if (typeof stopAnalogPolling === 'function') {
+      stopAnalogPolling();
     }
   }
 }
@@ -382,8 +408,13 @@ function bindEvents() {
        });
       if (tab === 'serial') {
         if (typeof loadSerialAssistant === 'function') loadSerialAssistant(false);
+      } else if (tab === 'adc' || tab === 'pwm') {
+        if (typeof loadAnalogAssistant === 'function') loadAnalogAssistant(false, tab);
+      } else if (tab === 'gpio' || tab === 'servo' || tab === 'system' || tab === 'led') {
+        if (typeof loadDeviceStatus === 'function') loadDeviceStatus();
       } else {
         if (typeof stopSerialPolling === 'function') stopSerialPolling();
+        if (typeof stopAnalogPolling === 'function') stopAnalogPolling();
       }
      });
    });
@@ -419,6 +450,7 @@ function bindEvents() {
    }
     if (el.serialRefreshCfgBtn) el.serialRefreshCfgBtn.addEventListener('click', () => loadSerialAssistant(false));
     if (el.serialSaveCfgBtn) el.serialSaveCfgBtn.addEventListener('click', saveSerialConfig);
+    if (el.serialResetPinsBtn) el.serialResetPinsBtn.addEventListener('click', resetSerialPinsToDefault);
     if (el.serialTxSendBtn) el.serialTxSendBtn.addEventListener('click', sendSerialPayload);
     if (el.serialClearLogBtn) el.serialClearLogBtn.addEventListener('click', clearSerialLog);
     if (el.serialPresetSaveBtn) el.serialPresetSaveBtn.addEventListener('click', saveSerialPreset);
@@ -430,17 +462,33 @@ function bindEvents() {
     if (el.serialUartId) {
       el.serialUartId.addEventListener('change', onSerialUartChanged);
     }
+    if (el.serialEnabled) {
+      el.serialEnabled.addEventListener('change', () => saveSerialConfig());
+    }
     if (el.serialRxPin) {
-      el.serialRxPin.addEventListener('change', onSerialUartChanged);
+      el.serialRxPin.addEventListener('change', onSerialPinsChanged);
     }
     if (el.serialTxPin) {
-      el.serialTxPin.addEventListener('change', onSerialUartChanged);
+      el.serialTxPin.addEventListener('change', onSerialPinsChanged);
     }
     if (el.serialHexView) {
       el.serialHexView.addEventListener('change', () => {
         if (typeof refreshSerialLogView === 'function') refreshSerialLogView();
       });
     }
+    if (el.adcRefreshCfgBtn) el.adcRefreshCfgBtn.addEventListener('click', () => loadAnalogAssistant(false, 'adc'));
+    if (el.adcSaveCfgBtn) el.adcSaveCfgBtn.addEventListener('click', () => applyAnalogAdcConfig());
+    if (el.adcReadBtn) el.adcReadBtn.addEventListener('click', () => readAnalogAdc(true));
+    if (el.adcEnabled) el.adcEnabled.addEventListener('change', () => applyAnalogAdcConfig());
+    if (el.adcPin) el.adcPin.addEventListener('change', () => updateAnalogHint('adc'));
+    if (el.adcAtten) el.adcAtten.addEventListener('change', () => updateAnalogHint('adc'));
+    if (el.pwmRefreshCfgBtn) el.pwmRefreshCfgBtn.addEventListener('click', () => loadAnalogAssistant(false, 'pwm'));
+    if (el.pwmApplyBtn) el.pwmApplyBtn.addEventListener('click', () => applyAnalogPwm());
+    if (el.pwmStopBtn) el.pwmStopBtn.addEventListener('click', () => stopAnalogPwm());
+    if (el.pwmEnabled) el.pwmEnabled.addEventListener('change', () => applyAnalogPwm());
+    if (el.pwmPin) el.pwmPin.addEventListener('change', () => updateAnalogHint('pwm'));
+    if (el.pwmFreq) el.pwmFreq.addEventListener('change', () => updateAnalogHint('pwm'));
+    if (el.pwmDuty) el.pwmDuty.addEventListener('input', () => updateAnalogHint('pwm'));
    if (el.codeLoadDraftBtn) el.codeLoadDraftBtn.addEventListener('click', loadCodeDraft);
    if (el.codeLoadActiveBtn) el.codeLoadActiveBtn.addEventListener('click', loadCodeActive);
    if (el.codeSaveDraftBtn) el.codeSaveDraftBtn.addEventListener('click', saveCodeDraft);

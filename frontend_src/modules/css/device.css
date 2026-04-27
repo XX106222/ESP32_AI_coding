@@ -285,6 +285,12 @@
   flex-wrap: wrap;
 }
 
+.serial-warn {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--yellow);
+}
+
 .serial-log-head {
   display: flex;
   justify-content: space-between;
@@ -306,6 +312,44 @@
 #serialTxFormat,
 #serialPresetFormat {
   min-width: 120px;
+}
+
+.analog-read-box {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg4);
+}
+
+.analog-read-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--accent2);
+  margin-bottom: 4px;
+}
+
+.analog-read-meta {
+  font-size: 0.75rem;
+  color: var(--text3);
+}
+
+#pwmDuty {
+  width: 100%;
+}
+
+.pwm-duty-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  margin-bottom: 12px;
+}
+
+.pwm-duty-row label {
+  min-width: 44px;
+  font-size: 0.78rem;
+  color: var(--text3);
 }
 
 @media (max-width: 900px) {
